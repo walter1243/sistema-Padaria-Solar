@@ -420,83 +420,88 @@ export default function AdminPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#060b14] text-[#eef4ff]">
-      <div className="mx-auto max-w-[1600px] px-3 py-4 md:px-6 md:py-6">
-        <header className="mb-4 flex items-center justify-between rounded-2xl border border-[#244063] bg-[#0b1424] p-3 md:p-4">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#8db5ff]">Painel Administrador</p>
-            <h1 className="text-2xl text-white md:text-4xl">Padaria Solar</h1>
-          </div>
+    <main className="min-h-screen flex bg-[#060b14] text-[#eef4ff]">
+      {/* Sidebar */}
+      <aside className="w-64 border-r border-[#244063] bg-[#0b1424] flex flex-col">
+        {/* Logo */}
+        <div className="border-b border-[#244063] p-4">
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#8db5ff]">Painel Admin</p>
+          <h1 className="text-xl font-bold text-white mt-2">Padaria Solar</h1>
+        </div>
 
-          <div className="flex items-center gap-2">
-            <a href="/" className="hidden text-sm font-bold text-[#d9e7ff] md:inline-block" title="Tela do cliente">
-              Cardapio
-            </a>
-            <a
-              href="/kitchen"
-              className="hidden text-sm font-bold text-[#d9e7ff] md:inline-block"
-              title="Painel separado da cozinha"
-            >
-              Cozinha
-            </a>
-            <a
-              href="/kitchen"
-              className="rounded-lg border border-[#365682] bg-[#13233f] px-3 py-2 text-xs font-bold text-[#d9e7ff]"
-            >
-              Abrir Tela Cozinha
-            </a>
-            <button
-              onClick={logout}
-              className="rounded-lg border border-[#365682] bg-[#13233f] px-3 py-2 text-xs font-bold text-[#d9e7ff]"
-            >
-              Sair
-            </button>
-          </div>
-        </header>
+        {/* Navigation */}
+        <nav className="flex-1 p-4 space-y-2">
+          <button
+            onClick={() => setActiveSection("menu")}
+            className={`w-full text-left px-4 py-3 rounded-lg text-sm font-bold transition ${
+              activeSection === "menu"
+                ? "bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] text-white"
+                : "text-[#d3e4ff] hover:bg-[#13233f]"
+            }`}
+          >
+            📦 Cadastro de Produtos
+          </button>
+          <button
+            onClick={() => setActiveSection("tables")}
+            className={`w-full text-left px-4 py-3 rounded-lg text-sm font-bold transition ${
+              activeSection === "tables"
+                ? "bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] text-white"
+                : "text-[#d3e4ff] hover:bg-[#13233f]"
+            }`}
+          >
+            🪑 Mesas
+          </button>
+          <button
+            onClick={() => setActiveSection("orders")}
+            className={`w-full text-left px-4 py-3 rounded-lg text-sm font-bold transition ${
+              activeSection === "orders"
+                ? "bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] text-white"
+                : "text-[#d3e4ff] hover:bg-[#13233f]"
+            }`}
+          >
+            📋 Pedidos
+          </button>
+        </nav>
 
-        <div className="rounded-2xl border border-[#234062] bg-[#0b1424] p-3 md:p-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => setActiveSection("menu")}
-              className={`rounded-xl px-4 py-2 text-sm font-bold transition ${
-                activeSection === "menu"
-                  ? "bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] text-white"
-                  : "bg-[#13233f] text-[#d3e4ff] hover:bg-[#1a2f50]"
-              }`}
-            >
-              Aba 1: Cadastro de Produtos
-            </button>
-            <button
-              onClick={() => setActiveSection("tables")}
-              className={`rounded-xl px-4 py-2 text-sm font-bold transition ${
-                activeSection === "tables"
-                  ? "bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] text-white"
-                  : "bg-[#13233f] text-[#d3e4ff] hover:bg-[#1a2f50]"
-              }`}
-            >
-              Aba 2: Mesas
-            </button>
-            <button
-              onClick={() => setActiveSection("orders")}
-              className={`rounded-xl px-4 py-2 text-sm font-bold transition ${
-                activeSection === "orders"
-                  ? "bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] text-white"
-                  : "bg-[#13233f] text-[#d3e4ff] hover:bg-[#1a2f50]"
-              }`}
-            >
-              Aba 3: Pedidos
-            </button>
-          </div>
+        {/* Links Externos */}
+        <div className="border-t border-[#244063] p-4 space-y-2">
+          <a
+            href="/"
+            className="block w-full text-center px-4 py-2 rounded-lg border border-[#365682] bg-[#13233f] text-xs font-bold text-[#d9e7ff] hover:bg-[#1a2f50] transition"
+            title="Cardápio do cliente"
+          >
+            🍽️ Cardápio
+          </a>
+          <a
+            href="/kitchen"
+            className="block w-full text-center px-4 py-2 rounded-lg border border-[#c81f2f] bg-[#c81f2f]/10 text-xs font-bold text-[#ff8c98] hover:bg-[#c81f2f]/20 transition"
+            title="Painel separado da cozinha"
+          >
+            👨‍🍳 Padaria
+          </a>
+          <button
+            onClick={logout}
+            className="w-full px-4 py-2 rounded-lg border border-[#365682] bg-[#13233f] text-xs font-bold text-[#d9e7ff] hover:bg-[#1a2f50] transition"
+          >
+            🚪 Sair
+          </button>
+        </div>
+      </aside>
 
-          <div className="mt-4 rounded-xl border border-[#2a4162] bg-[#101d33] p-3">
-            <p className="text-xs text-[#9bb0d0]">Perfis separados</p>
-            <p className="mt-2 text-sm font-bold text-[#d9e7ff]">1. Cliente: faz pedido em /</p>
-            <p className="text-sm font-bold text-[#d9e7ff]">2. Cozinha: recebe pedido e avanca status em /kitchen</p>
-            <p className="text-sm font-bold text-[#d9e7ff]">3. Administrador: cadastro, mesas e controle em /admin</p>
-            <p className="mt-2 text-xs text-[#8db5ff]">A cozinha e individual e separada, mas controlada pelo admin.</p>
-          </div>
+      {/* Main Content */}
+      <div className="flex-1 overflow-auto">
+        <div className="min-h-screen p-6">
+          {/* Header */}
+          <header className="mb-6">
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#8db5ff]">Painel Administrativo</p>
+            <h1 className="text-4xl font-bold text-white mt-2">
+              {activeSection === "menu" && "Cadastro de Produtos"}
+              {activeSection === "tables" && "Mesas"}
+              {activeSection === "orders" && "Pedidos"}
+            </h1>
+          </header>
 
-          <section className="mt-4 space-y-4">
+          <section className="space-y-4">
             {activeSection === "menu" && (
               <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
                 <form
