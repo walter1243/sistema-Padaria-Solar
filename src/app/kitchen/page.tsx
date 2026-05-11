@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Order, OrderStatus } from "@/lib/types";
 
-const columns: OrderStatus[] = ["novo", "preparando", "pronto"];
+const columns: OrderStatus[] = ["novo", "preparando"];
 
 function statusTitle(status: OrderStatus) {
   const map: Record<OrderStatus, string> = {
@@ -213,6 +213,8 @@ export default function KitchenPage() {
                       {statusTitle(order.status)}
                     </span>
                   </div>
+
+                  <p className="mt-2 text-sm font-bold text-[#8db5ff]">Cliente: {order.customerName}</p>
 
                   <ul className="mt-2 space-y-1 text-sm text-[#d6e3f8]">
                     {order.items.map((item) => (

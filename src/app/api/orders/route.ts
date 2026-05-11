@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { addOrder, listOrders } from "@/lib/store";
+import { addOrder, listOrders, validateTableSession } from "@/lib/store";
 
 type RawOrderItem = {
   itemId?: unknown;
@@ -16,6 +16,7 @@ export async function POST(request: Request) {
 
   const customerName = String(body.customerName ?? "").trim();
   const tableId = String(body.tableId ?? "").trim();
+  const sessionId = String(body.sessionId ?? "").trim();
   const notes = String(body.notes ?? "").trim();
   const items: RawOrderItem[] = Array.isArray(body.items) ? body.items : [];
 
@@ -32,8 +33,20 @@ export async function POST(request: Request) {
 
   const total = safeItems.reduce((acc, item) => acc + item.price * item.quantity, 0);
 
+  const sessionValidation = validateTableSession(tableId, sessionId);
+  if (!sessionValidation.allowed) {
+    if (sessionValidation.reason === "missing-session") {
+      return NextResponse.json({ error: "Sessao da mesa invalida. Reabra o cardapio pelo QR Code." }, { status: 400 });
+    }
+    if (sessionValidation.reason === "session-closed") {
+      return NextResponse.json({ error: "Esta sessao ja foi encerrada. Escaneie o QR Code novamente." }, { status: 409 });
+    }
+    return NextResponse.json({ error: "Mesa em uso por outra sessao." }, { status: 409 });
+  }
+
   const created = addOrder({
     tableId,
+    sessionId,
     customerName,
     notes,
     items: safeItems,

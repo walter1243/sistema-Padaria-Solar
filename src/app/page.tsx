@@ -45,6 +45,7 @@ function HomePageContent() {
   const [showCart, setShowCart] = useState(false);
   const [cartStep, setCartStep] = useState<CartStep>("items");
   const [tableId, setTableId] = useState("");
+  const [tableSessionId, setTableSessionId] = useState("");
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
 
   const [addonModalItem, setAddonModalItem] = useState<MenuItem | null>(null);
@@ -66,8 +67,22 @@ function HomePageContent() {
     const mesa = (searchParams.get("mesa") || "").trim();
     if (!mesa) return;
     setTableId(mesa);
-    setCustomerName(`Mesa ${mesa}`);
+    setCustomerName(mesa === "11" ? "" : `Mesa ${mesa}`);
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!tableId) return;
+    const storageKey = `padaria:table-session:${tableId}`;
+    const existing = sessionStorage.getItem(storageKey);
+    if (existing) {
+      setTableSessionId(existing);
+      return;
+    }
+
+    const nextSession = crypto.randomUUID();
+    sessionStorage.setItem(storageKey, nextSession);
+    setTableSessionId(nextSession);
+  }, [tableId]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -144,6 +159,7 @@ function HomePageContent() {
   }, [menu]);
 
   const cartCount = useMemo(() => cartLines.reduce((acc, line) => acc + line.quantity, 0), [cartLines]);
+  const isCashierQuickTable = tableId === "11";
 
   const total = useMemo(
     () => cartLines.reduce((acc, line) => {
@@ -282,6 +298,16 @@ function HomePageContent() {
       return;
     }
 
+    if (tableId && !tableSessionId) {
+      setMessage("Sessao da mesa nao carregada ainda. Tente novamente em instantes.");
+      return;
+    }
+
+    if (isCashierQuickTable && !customerName.trim()) {
+      setMessage("Informe o nome para pedidos da mesa 11 (caixa).");
+      return;
+    }
+
     const items: OrderItem[] = cartLines
       .map((line) => {
         const item = itemsMap[line.itemId];
@@ -312,6 +338,7 @@ function HomePageContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tableId,
+          sessionId: tableSessionId,
           customerName: customerName.trim() || (tableId ? `Mesa ${tableId}` : "Cliente"),
           notes: "",
           items,
@@ -319,7 +346,8 @@ function HomePageContent() {
       });
 
       if (!res.ok) {
-        setMessage("Nao foi possivel enviar o pedido.");
+        const payload = (await res.json().catch(() => ({}))) as { error?: string };
+        setMessage(payload.error || "Nao foi possivel enviar o pedido.");
         return;
       }
 
@@ -636,6 +664,18 @@ function HomePageContent() {
               <div className="flex-1 overflow-y-auto p-4">
                 {cartStep === "items" && (
                   <div className="space-y-3">
+                    {isCashierQuickTable && (
+                      <div className="rounded-lg bg-[#13233f] p-3">
+                        <p className="text-xs font-bold text-[#9bb0d0]">Nome do cliente (mesa 11 - caixa)</p>
+                        <input
+                          value={customerName}
+                          onChange={(e) => setCustomerName(e.target.value)}
+                          placeholder="Digite seu nome"
+                          className="mt-2 w-full rounded-lg border border-[#2f466d] bg-[#0f1b30] px-3 py-2 text-sm font-bold text-[#eef4ff] outline-none focus:border-[#0f5bd4]"
+                        />
+                      </div>
+                    )}
+
                     {cartLines.length === 0 ? (
                       <p className="text-center text-sm text-[#9bb0d0]">Carrinho vazio</p>
                     ) : (
@@ -718,7 +758,16 @@ function HomePageContent() {
                   <div className="space-y-3">
                     <div className="rounded-lg bg-[#13233f] p-3">
                       <p className="text-xs font-bold text-[#9bb0d0]">Nome/Mesa</p>
-                      <p className="mt-1 text-sm font-bold text-[#eef4ff]">{customerName}</p>
+                      {isCashierQuickTable ? (
+                        <input
+                          value={customerName}
+                          onChange={(e) => setCustomerName(e.target.value)}
+                          placeholder="Nome do cliente (obrigatorio no caixa)"
+                          className="mt-1 w-full rounded-lg border border-[#2f466d] bg-[#0f1b30] px-3 py-2 text-sm font-bold text-[#eef4ff] outline-none focus:border-[#0f5bd4]"
+                        />
+                      ) : (
+                        <p className="mt-1 text-sm font-bold text-[#eef4ff]">{customerName}</p>
+                      )}
                     </div>
 
                     <div className="rounded-lg bg-[#13233f] p-3">

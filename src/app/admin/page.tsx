@@ -1017,12 +1017,13 @@ export default function AdminPage() {
                 </div>
 
                 <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {Array.from({ length: 10 }).map((_, index) => {
+                  {Array.from({ length: 11 }).map((_, index) => {
                     const tableId = String(index + 1);
                     const orderLink = `${baseUrl}/?mesa=${tableId}`;
                     const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(orderLink)}`;
                     const summary = tableSummaries.find((table) => table.tableId === tableId);
                     const isOccupied = Boolean(summary && summary.total > 0);
+                    const isCashierQuickTable = tableId === "11";
 
                     return (
                       <article key={tableId} className="rounded-2xl border border-[#2a4162] bg-[#101d33] p-3">
@@ -1033,9 +1034,31 @@ export default function AdminPage() {
                           </span>
                         </div>
 
+                        {isCashierQuickTable && (
+                          <p className="mt-2 rounded-lg border border-[#2e476f] bg-[#13233f] px-2 py-1 text-xs font-bold text-[#8db5ff]">
+                            QR do caixa (autoatendimento rapido)
+                          </p>
+                        )}
+
                         <img src={qrUrl} alt={`QR Mesa ${tableId}`} className="mx-auto mt-3 h-28 w-28 rounded-lg bg-white p-1" />
 
                         <p className="mt-3 text-xs text-[#9bb0d0]">Link: {orderLink}</p>
+                        {isCashierQuickTable && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await navigator.clipboard.writeText(orderLink);
+                                setFormNotice("Link da mesa 11 copiado para divulgar no Instagram.");
+                              } catch {
+                                setError("Nao foi possivel copiar o link da mesa 11.");
+                              }
+                            }}
+                            className="mt-2 w-full rounded-lg border border-[#2e476f] bg-[#13233f] px-2 py-2 text-xs font-bold text-[#8db5ff]"
+                          >
+                            Copiar link rapido (Mesa 11)
+                          </button>
+                        )}
                         <p className="mt-2 text-xs text-[#9bb0d0]">Pedidos ativos: {summary?.count || 0}</p>
                         <p className="mt-2 text-lg font-black text-[#ff8c98]">
                           Total: {currency(summary?.total || 0)}

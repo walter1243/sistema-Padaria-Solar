@@ -87,6 +87,13 @@ let orders: Order[] = [
 ];
 
 let payments: PaymentRecord[] = [];
+let tableActiveSessions: Record<string, string> = {};
+let tableClosedSessions: Record<string, string[]> = {};
+
+type TableSessionValidation = {
+  allowed: boolean;
+  reason?: "missing-session" | "session-closed" | "table-in-use";
+};
 
 export function listMenu() {
   return menu;
@@ -158,6 +165,34 @@ export function listOrders() {
   return orders.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
 }
 
+export function validateTableSession(tableId: string, sessionId?: string): TableSessionValidation {
+  const normalizedTableId = tableId.trim();
+  if (!normalizedTableId) {
+    return { allowed: true };
+  }
+
+  const normalizedSessionId = String(sessionId ?? "").trim();
+  if (!normalizedSessionId) {
+    return { allowed: false, reason: "missing-session" };
+  }
+
+  const activeSession = tableActiveSessions[normalizedTableId];
+  if (activeSession) {
+    if (activeSession !== normalizedSessionId) {
+      return { allowed: false, reason: "table-in-use" };
+    }
+    return { allowed: true };
+  }
+
+  const closedSessions = tableClosedSessions[normalizedTableId] || [];
+  if (closedSessions.includes(normalizedSessionId)) {
+    return { allowed: false, reason: "session-closed" };
+  }
+
+  tableActiveSessions[normalizedTableId] = normalizedSessionId;
+  return { allowed: true };
+}
+
 export function addOrder(order: Omit<Order, "id" | "createdAt" | "status">) {
   const newOrder: Order = {
     ...order,
@@ -207,6 +242,12 @@ export function closeTableWithPayment(tableId: string, method: PaymentMethod) {
   };
 
   payments = [payment, ...payments];
+
+  const closedSession = tableActiveSessions[normalizedTableId];
+  if (closedSession) {
+    tableClosedSessions[normalizedTableId] = [...new Set([...(tableClosedSessions[normalizedTableId] || []), closedSession])];
+    delete tableActiveSessions[normalizedTableId];
+  }
 
   return { closedOrders: activeOrders.length, total, payment };
 }
