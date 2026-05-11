@@ -65,6 +65,14 @@ export default function AdminPage() {
   const [kitchenUser, setKitchenUser] = useState("");
   const [kitchenPass, setKitchenPass] = useState("");
 
+  // Estados para edição e pesquisa
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchCategory, setSearchCategory] = useState<MenuCategory | "">("");
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleteItemId, setDeleteItemId] = useState<string | null>(null);
+  const [deletePassword, setDeletePassword] = useState("");
+
   async function loadData() {
     const [menuRes, ordersRes, categoriesRes, bakerRes] = await Promise.all([
       fetch("/api/menu", { cache: "no-store" }),
@@ -323,10 +331,74 @@ export default function AdminPage() {
     loadData();
   }
 
-  async function deleteItem(id: string) {
-    await fetch(`/api/menu/${id}`, { method: "DELETE" });
+  function editItem(item: MenuItem) {
+    applyDraftToForm(buildDraftFromItem(item));
+    setEditingItemId(item.id);
+    setFormNotice(`Editando: ${item.name}`);
+  }
+
+  async function updateItem() {
+    if (!editingItemId) return;
+
+    const addons = addonsText
+      .split(",")
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+
+    const res = await fetch(`/api/menu/${editingItemId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name,
+        description,
+        price: Number(price),
+        category,
+        unit,
+        imageUrl,
+        available: true,
+        addons,
+      }),
+    });
+
+    if (!res.ok) {
+      setError("Nao foi possivel atualizar item.");
+      return;
+    }
+
+    setName("");
+    setDescription("");
+    setPrice("");
+    setUnit("un");
+    setImageUrl("");
+    setAddonsText("");
+    setEditingItemId(null);
+    setError("");
+    setFormNotice("Item atualizado com sucesso.");
     loadData();
   }
+
+  async function confirmDelete(id: string) {
+    if (deletePassword !== "123") {
+      setError("Senha incorreta. Use '123' para confirmar exclusao.");
+      return;
+    }
+
+    await fetch(`/api/menu/${id}`, { method: "DELETE" });
+    setDeleteModalOpen(false);
+    setDeleteItemId(null);
+    setDeletePassword("");
+    setError("");
+    setFormNotice("Produto excluido com sucesso.");
+    loadData();
+  }
+
+  const filteredMenu = useMemo(() => {
+    return menu.filter((item) => {
+      const matchesSearch = searchQuery === "" || item.name.toLowerCase().includes(searchQuery.toLowerCase()) || item.description.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesCategory = searchCategory === "" || item.category === searchCategory;
+      return matchesSearch && matchesCategory;
+    });
+  }, [menu, searchQuery, searchCategory]);
 
   async function nextStatus(order: Order) {
     const currentIndex = statusFlow.indexOf(order.status);
@@ -593,9 +665,41 @@ export default function AdminPage() {
                       </button>
                     </div>
 
-                    <button className="w-full rounded-xl bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] px-4 py-3 font-bold text-white">
-                      Cadastrar Item
-                    </button>
+                    {editingItemId ? (
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={updateItem}
+                          className="flex-1 rounded-xl bg-gradient-to-r from-[#0f5bd4] to-[#0f5bd4] px-4 py-3 font-bold text-white"
+                        >
+                          ✏️ Atualizar Item
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingItemId(null);
+                            setName("");
+                            setDescription("");
+                            setPrice("");
+                            setUnit("un");
+                            setImageUrl("");
+                            setAddonsText("");
+                            setFormNotice("");
+                          }}
+                          className="flex-1 rounded-xl border border-[#2f466d] bg-[#13233f] px-4 py-3 font-bold text-[#d6e3f8]"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={addMenu}
+                        className="w-full rounded-xl bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] px-4 py-3 font-bold text-white"
+                      >
+                        Cadastrar Item
+                      </button>
+                    )}
                     {formNotice && <p className="text-xs font-semibold text-[#8fe0b8]">{formNotice}</p>}
                   </div>
 
@@ -627,49 +731,83 @@ export default function AdminPage() {
                 </form>
 
                 <section className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4 shadow-[0_10px_24px_rgba(0,0,0,0.35)]">
-                  <h2 className="text-3xl text-white">Cardapio Atual</h2>
-                  <div className="mt-4 grid gap-3 md:grid-cols-2">
-                    {menu.map((item) => (
+                  <h2 className="text-3xl text-white mb-4">Cardápio Atual</h2>
+
+                  {/* Barra de Pesquisa */}
+                  <div className="mb-4 space-y-2">
+                    <input
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="🔍 Pesquisar produto por nome ou descrição..."
+                      className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-4 py-3 text-[#eef4ff] placeholder:text-[#7a94b8]"
+                    />
+                    <div className="flex gap-2">
+                      <select
+                        value={searchCategory}
+                        onChange={(e) => setSearchCategory((e.target.value as MenuCategory) || "")}
+                        className="flex-1 rounded-xl border border-[#2f466d] bg-[#091426] px-4 py-2 text-[#eef4ff]"
+                      >
+                        <option value="">Todas as categorias</option>
+                        {categories.map((cat) => (
+                          <option key={cat} value={cat}>{cat}</option>
+                        ))}
+                      </select>
+                      {(searchQuery || searchCategory) && (
+                        <button
+                          onClick={() => {
+                            setSearchQuery("");
+                            setSearchCategory("");
+                          }}
+                          className="rounded-xl border border-[#2f466d] bg-[#13233f] px-4 py-2 text-sm font-bold text-[#d6e3f8]"
+                        >
+                          Limpar
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <p className="mb-3 text-xs text-[#8db5ff]">{filteredMenu.length} produto(s) encontrado(s)</p>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {filteredMenu.map((item) => (
                       <article key={item.id} className="rounded-2xl border border-[#2a4162] bg-[#101d33] p-3">
                         <div className="flex items-center justify-between gap-2">
                           <h3 className="text-xl leading-none text-white">{item.name}</h3>
-                          <span className="text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">
-                            {item.category}
+                          <span className={`text-xs font-bold uppercase tracking-[0.1em] px-2 py-1 rounded ${item.available ? "bg-[#8fe0b8]/20 text-[#8fe0b8]" : "bg-[#ff8c98]/20 text-[#ff8c98]"}`}>
+                            {item.available ? "Ativo" : "Inativo"}
                           </span>
                         </div>
-                        <p className="mt-1 text-sm text-[#b2c5e2]">{item.description}</p>
+                        <span className="inline-block mt-2 text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">
+                          {item.category}
+                        </span>
+                        <p className="mt-2 text-sm text-[#b2c5e2]">{item.description}</p>
                         {item.addons && item.addons.length > 0 && (
                           <p className="mt-2 text-xs text-[#97afcf]">Acompanhamentos: {item.addons.join(", ")}</p>
                         )}
                         <p className="mt-2 text-sm font-bold text-[#ff8c98]">{currency(item.price)}</p>
                         <p className="mt-1 text-xs text-[#8db5ff]">Unidade: {item.unit}</p>
-                        <div className="mt-3 flex gap-2">
+                        <div className="mt-3 flex gap-2 flex-wrap">
                           <button
-                            onClick={() => copyProductDraft(buildDraftFromItem(item))}
-                            className="rounded-lg border border-[#2e476f] bg-[#13233f] px-3 py-2 text-xs font-bold text-[#d3e4ff]"
+                            onClick={() => editItem(item)}
+                            className="rounded-lg border border-[#0f5bd4] bg-[#0f5bd4]/20 px-3 py-2 text-xs font-bold text-[#0f9fff] hover:bg-[#0f5bd4]/40 transition"
                           >
-                            Copiar
-                          </button>
-                          <button
-                            onClick={() => {
-                              applyDraftToForm(buildDraftFromItem(item));
-                              setFormNotice("Produto carregado no formulario para duplicacao.");
-                            }}
-                            className="rounded-lg border border-[#2e476f] bg-[#13233f] px-3 py-2 text-xs font-bold text-[#d3e4ff]"
-                          >
-                            Carregar
+                            ✏️ Editar
                           </button>
                           <button
                             onClick={() => toggleAvailability(item)}
-                            className="flex-1 rounded-lg border border-[#2e476f] bg-[#13233f] px-2 py-2 text-xs font-bold text-[#d3e4ff]"
+                            className="flex-1 rounded-lg border border-[#2e476f] bg-[#13233f] px-2 py-2 text-xs font-bold text-[#d3e4ff] hover:bg-[#1a2f50] transition"
                           >
-                            {item.available ? "Desativar" : "Ativar"}
+                            {item.available ? "🔒 Desativar" : "🔓 Ativar"}
                           </button>
                           <button
-                            onClick={() => deleteItem(item.id)}
-                            className="rounded-lg bg-[#c81f2f] px-3 py-2 text-xs font-bold text-white"
+                            onClick={() => {
+                              setDeleteItemId(item.id);
+                              setDeleteModalOpen(true);
+                              setDeletePassword("");
+                            }}
+                            className="rounded-lg bg-[#c81f2f] px-3 py-2 text-xs font-bold text-white hover:bg-[#b01625] transition"
                           >
-                            Excluir
+                            🗑️ Excluir
                           </button>
                         </div>
                       </article>
@@ -774,6 +912,55 @@ export default function AdminPage() {
           </section>
         </div>
       </div>
+
+      {/* Modal de Confirmação de Exclusão */}
+      {deleteModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="rounded-2xl border border-[#c81f2f] bg-[#0b1424] p-6 max-w-sm w-full mx-4">
+            <h3 className="text-2xl font-bold text-white mb-2">🗑️ Confirmar Exclusão</h3>
+            <p className="text-sm text-[#b2c5e2] mb-4">Esta ação não pode ser desfeita. Digite a senha para confirmar.</p>
+            
+            <input
+              type="password"
+              value={deletePassword}
+              onChange={(e) => setDeletePassword(e.target.value)}
+              placeholder="Digite a senha..."
+              className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-4 py-3 text-[#eef4ff] mb-4"
+              onKeyPress={(e) => {
+                if (e.key === "Enter" && deleteItemId) {
+                  confirmDelete(deleteItemId);
+                }
+              }}
+            />
+
+            {error && <p className="mb-3 text-xs font-semibold text-[#ff8c98]">{error}</p>}
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  setDeleteModalOpen(false);
+                  setDeleteItemId(null);
+                  setDeletePassword("");
+                  setError("");
+                }}
+                className="flex-1 rounded-lg border border-[#365682] bg-[#13233f] px-4 py-3 font-bold text-[#d9e7ff] hover:bg-[#1a2f50] transition"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  if (deleteItemId) {
+                    confirmDelete(deleteItemId);
+                  }
+                }}
+                className="flex-1 rounded-lg bg-[#c81f2f] px-4 py-3 font-bold text-white hover:bg-[#b01625] transition"
+              >
+                Excluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
