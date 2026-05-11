@@ -52,6 +52,7 @@ let menu: MenuItem[] = [
 let orders: Order[] = [
   {
     id: "o1",
+    tableId: "3",
     customerName: "Mesa 3",
     notes: "Sem cebola no lanche",
     items: [{ itemId: "m2", name: "X-Egg Artesanal", price: 24.9, quantity: 1 }],

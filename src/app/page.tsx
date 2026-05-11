@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { MenuCategory, MenuItem, OrderItem } from "@/lib/types";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { MenuCategory, MenuItem, Order, OrderItem } from "@/lib/types";
 
 type CartStep = "items" | "info" | "confirm";
 
@@ -30,7 +31,8 @@ function lineUnitPrice(line: CartLine) {
   return line.basePrice + line.selectedAddons.length * ADDON_PRICE;
 }
 
-export default function HomePage() {
+function HomePageContent() {
+  const searchParams = useSearchParams();
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [cartLines, setCartLines] = useState<CartLine[]>([]);
   const [customerName, setCustomerName] = useState("");
@@ -42,6 +44,8 @@ export default function HomePage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [showCart, setShowCart] = useState(false);
   const [cartStep, setCartStep] = useState<CartStep>("items");
+  const [tableId, setTableId] = useState("");
+  const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
 
   const [addonModalItem, setAddonModalItem] = useState<MenuItem | null>(null);
   const [addonDraft, setAddonDraft] = useState<string[]>([]);
@@ -58,12 +62,43 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
+    const mesa = (searchParams.get("mesa") || "").trim();
+    if (!mesa) return;
+    setTableId(mesa);
+    setCustomerName(`Mesa ${mesa}`);
+  }, [searchParams]);
+
+  useEffect(() => {
     const timer = setInterval(() => {
       loadMenu();
     }, 5000);
 
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    async function loadCustomerOrders() {
+      if (!tableId && !customerName.trim()) {
+        setCustomerOrders([]);
+        return;
+      }
+
+      const res = await fetch("/api/orders", { cache: "no-store" });
+      if (!res.ok) return;
+
+      const allOrders = (await res.json()) as Order[];
+      const filtered = allOrders.filter((order) => {
+        if (tableId && order.tableId === tableId) return true;
+        return customerName.trim().length > 0 && order.customerName.toLowerCase() === customerName.trim().toLowerCase();
+      });
+
+      setCustomerOrders(filtered);
+    }
+
+    loadCustomerOrders();
+    const timer = setInterval(loadCustomerOrders, 4000);
+    return () => clearInterval(timer);
+  }, [tableId, customerName]);
 
   const filteredMenu = useMemo(() => {
     return menu.filter((item) => {
@@ -245,6 +280,7 @@ export default function HomePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          tableId,
           customerName,
           notes,
           items,
@@ -339,6 +375,24 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      {customerOrders.length > 0 && (
+        <section className="px-3 pb-3">
+          <div className="rounded-2xl border border-[#1f314f] bg-[#0b1424] p-3 shadow-[0_8px_18px_rgba(0,0,0,0.38)]">
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#8db5ff]">Acompanhamento do pedido</p>
+            <div className="mt-2 space-y-2">
+              {customerOrders.slice(0, 4).map((order) => (
+                <div key={order.id} className="rounded-xl border border-[#2b4062] bg-[#101d33] px-3 py-2">
+                  <p className="text-xs text-[#9bb0d0]">
+                    Pedido {order.id.slice(0, 6)} - {new Date(order.createdAt).toLocaleTimeString("pt-BR")}
+                  </p>
+                  <p className="mt-1 text-sm font-bold text-[#eef4ff]">Status: {order.status}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       <main className="flex-1 overflow-y-auto px-3 pb-6">
         {Object.entries(menuByCategory).map(([category, items]) =>
@@ -631,8 +685,10 @@ export default function HomePage() {
                         value={customerName}
                         onChange={(e) => setCustomerName(e.target.value)}
                         placeholder="Ex: Mesa 3"
+                        readOnly={Boolean(tableId)}
                         className="mt-1 w-full rounded-lg border border-[#2e476f] bg-[#091426] px-3 py-2 text-sm text-[#eef4ff] outline-none focus:border-[#0f5bd4]"
                       />
+                      {tableId && <p className="mt-1 text-[11px] text-[#8db5ff]">Mesa vinculada por QR: {tableId}</p>}
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-[#9bb0d0]">Observacoes (opcional)</label>
@@ -740,5 +796,19 @@ export default function HomePage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function HomePage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="flex min-h-screen items-center justify-center bg-[#060b14] text-[#d6e3f8]">
+          <p className="text-sm font-semibold uppercase tracking-[0.14em]">Carregando cardapio...</p>
+        </main>
+      }
+    >
+      <HomePageContent />
+    </Suspense>
   );
 }

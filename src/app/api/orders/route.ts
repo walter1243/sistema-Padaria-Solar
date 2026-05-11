@@ -15,6 +15,7 @@ export async function POST(request: Request) {
   const body = await request.json();
 
   const customerName = String(body.customerName ?? "").trim();
+  const tableId = String(body.tableId ?? "").trim();
   const notes = String(body.notes ?? "").trim();
   const items: RawOrderItem[] = Array.isArray(body.items) ? body.items : [];
 
@@ -32,6 +33,7 @@ export async function POST(request: Request) {
   const total = safeItems.reduce((acc, item) => acc + item.price * item.quantity, 0);
 
   const created = addOrder({
+    tableId,
     customerName,
     notes,
     items: safeItems,
