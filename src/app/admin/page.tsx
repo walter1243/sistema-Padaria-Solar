@@ -152,13 +152,6 @@ export default function AdminPage() {
     }
   }, [authorized, refreshTick]);
 
-  const groupedOrders = useMemo(() => {
-    return statusFlow.map((status) => ({
-      status,
-      items: orders.filter((order) => order.status === status),
-    }));
-  }, [orders]);
-
   const tableSummaries = useMemo(() => {
     const activeOrders = orders.filter((order) => order.status !== "entregue");
     const map: Record<string, { tableId: string; total: number; count: number; orders: Order[] }> = {};
@@ -229,18 +222,6 @@ export default function AdminPage() {
     setMobileMenuOpen(false);
   }
 
-  function buildDraftFromForm(): ProductDraft {
-    return {
-      name,
-      description,
-      price,
-      category,
-      unit,
-      imageUrl,
-      addonsText,
-    };
-  }
-
   function applyDraftToForm(draft: ProductDraft) {
     setName(draft.name || "");
     setDescription(draft.description || "");
@@ -263,50 +244,50 @@ export default function AdminPage() {
     };
   }
 
-  async function copyProductDraft(draft: ProductDraft) {
-    try {
-      await navigator.clipboard.writeText(JSON.stringify(draft));
-      setFormNotice("Produto copiado. Use Colar para preencher o formulario.");
-      setError("");
-    } catch {
-      setError("Nao foi possivel copiar. Verifique permissoes do navegador.");
+  const handleImagePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith("image/")) {
+        e.preventDefault();
+        const file = items[i].getAsFile();
+        if (file) {
+          convertImageToDataUrl(file);
+        }
+        return;
+      }
     }
-  }
+  };
 
-  async function pasteProductDraft() {
-    try {
-      const raw = await navigator.clipboard.readText();
-      const parsed = JSON.parse(raw) as Partial<ProductDraft>;
+  const handleImageDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const files = e.dataTransfer?.files;
+    if (!files) return;
 
-      const normalizedCategory: MenuCategory =
-        parsed.category === "Salgado" ||
-        parsed.category === "Lanche" ||
-        parsed.category === "Bebida" ||
-        parsed.category === "Doce"
-          ? parsed.category
-          : "Salgado";
-
-      const normalizedUnit: UnitMeasure =
-        parsed.unit === "un" || parsed.unit === "kg" || parsed.unit === "g" || parsed.unit === "l" || parsed.unit === "ml"
-          ? parsed.unit
-          : "un";
-
-      applyDraftToForm({
-        name: typeof parsed.name === "string" ? parsed.name : "",
-        description: typeof parsed.description === "string" ? parsed.description : "",
-        price: typeof parsed.price === "string" ? parsed.price : "",
-        category: normalizedCategory,
-        unit: normalizedUnit,
-        imageUrl: typeof parsed.imageUrl === "string" ? parsed.imageUrl : "",
-        addonsText: typeof parsed.addonsText === "string" ? parsed.addonsText : "",
-      });
-
-      setFormNotice("Produto colado no formulario.");
-      setError("");
-    } catch {
-      setError("Nao foi possivel colar. Copie um JSON de produto valido.");
+    for (let i = 0; i < files.length; i++) {
+      if (files[i].type.startsWith("image/")) {
+        convertImageToDataUrl(files[i]);
+        return;
+      }
     }
-  }
+  };
+
+  const handleImageDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const convertImageToDataUrl = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result as string;
+      setImageUrl(result);
+      setFormNotice("Imagem carregada com sucesso.");
+    };
+    reader.readAsDataURL(file);
+  };
 
   async function addMenu(e: FormEvent) {
     e.preventDefault();
@@ -449,19 +430,6 @@ export default function AdminPage() {
       return matchesSearch && matchesCategory;
     });
   }, [menu, searchQuery, searchCategory]);
-
-  async function nextStatus(order: Order) {
-    const currentIndex = statusFlow.indexOf(order.status);
-    if (currentIndex >= statusFlow.length - 1) return;
-
-    await fetch(`/api/orders/${order.id}/status`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: statusFlow[currentIndex + 1] }),
-    });
-
-    loadData();
-  }
 
   async function closeTableAccount() {
     if (!closeTableId) return;
@@ -820,13 +788,24 @@ export default function AdminPage() {
                       <option value="l">Litro (l)</option>
                       <option value="ml">Mililitro (ml)</option>
                     </select>
-                    <input
-                      value={imageUrl}
-                      onChange={(e) => setImageUrl(e.target.value)}
-                      placeholder="URL da foto"
-                      required
-                      className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]"
-                    />
+                    <div
+                      onDrop={handleImageDrop}
+                      onDragOver={handleImageDragOver}
+                      className="w-full rounded-xl border-2 border-dashed border-[#2f466d] bg-[#091426] px-3 py-4 transition-colors hover:border-[#0f5bd4]"
+                    >
+                      <input
+                        value={imageUrl}
+                        onChange={(e) => setImageUrl(e.target.value)}
+                        onPaste={handleImagePaste}
+                        placeholder="Cole a imagem ou arraste para cá (Ctrl+V ou drag-drop)"
+                        className="w-full bg-transparent text-[#eef4ff] placeholder-[#7a95bd] outline-none"
+                      />
+                      {imageUrl && (
+                        <div className="mt-2 overflow-hidden rounded-lg">
+                          <img src={imageUrl} alt="preview" className="h-20 w-auto object-cover" />
+                        </div>
+                      )}
+                    </div>
                     <input
                       value={addonsText}
                       onChange={(e) => setAddonsText(e.target.value)}
@@ -834,22 +813,7 @@ export default function AdminPage() {
                       className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]"
                     />
 
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => copyProductDraft(buildDraftFromForm())}
-                        className="rounded-xl border border-[#2f466d] bg-[#13233f] px-4 py-2 text-sm font-bold text-[#d6e3f8]"
-                      >
-                        Copiar Produto
-                      </button>
-                      <button
-                        type="button"
-                        onClick={pasteProductDraft}
-                        className="rounded-xl border border-[#2f466d] bg-[#13233f] px-4 py-2 text-sm font-bold text-[#d6e3f8]"
-                      >
-                        Colar Produto
-                      </button>
-                    </div>
+
 
                     {editingItemId ? (
                       <div className="flex gap-2">
@@ -1050,37 +1014,27 @@ export default function AdminPage() {
             {activeSection === "orders" && (
               <section className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4 shadow-[0_10px_24px_rgba(0,0,0,0.35)]">
                 <h2 className="text-3xl text-white">Pedidos</h2>
-                <div className="mt-4 grid gap-4 xl:grid-cols-4">
-                  {groupedOrders.map((group) => (
-                    <div key={group.status} className="rounded-2xl border border-[#2a4162] bg-[#101d33] p-3">
-                      <h3 className="text-2xl text-white">{statusLabel(group.status)}</h3>
-                      <div className="mt-3 space-y-2">
-                        {group.items.length === 0 && <p className="text-xs text-[#93a8c6]">Sem pedidos.</p>}
-                        {group.items.map((order) => (
-                          <article key={order.id} className="rounded-xl border border-[#2b4062] p-2">
-                            <p className="font-bold text-[#eef4ff]">{order.customerName}</p>
-                            <p className="text-xs text-[#93a8c6]">{new Date(order.createdAt).toLocaleTimeString("pt-BR")}</p>
-                            <ul className="mt-2 space-y-1 text-xs text-[#d6e3f8]">
-                              {order.items.map((item) => (
-                                <li key={`${order.id}-${item.itemId}`}>
-                                  {item.quantity}x {item.name}
-                                </li>
-                              ))}
-                            </ul>
-                            {order.notes && <p className="mt-2 text-xs italic text-[#93a8c6]">Obs: {order.notes}</p>}
-                            <p className="mt-2 text-sm font-bold text-[#ff8c98]">{currency(order.total)}</p>
-                            <button
-                              onClick={() => nextStatus(order)}
-                              disabled={order.status === "entregue"}
-                              className="mt-2 w-full rounded-lg bg-[#0f5bd4] px-2 py-2 text-xs font-bold text-white disabled:opacity-40"
-                            >
-                              Avancar status
-                            </button>
-                          </article>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
+                <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {orders.length === 0 && <p className="text-sm text-[#93a8c6]">Sem pedidos no momento.</p>}
+                  {orders.map((order) => {
+                    const tableId = getOrderTableId(order);
+                    return (
+                      <article key={order.id} className="rounded-xl border border-[#2b4062] bg-[#101d33] p-3">
+                        <p className="text-lg font-bold text-[#eef4ff]">Mesa {tableId}</p>
+                        <p className="text-xs text-[#93a8c6]">{new Date(order.createdAt).toLocaleTimeString("pt-BR")}</p>
+                        <ul className="mt-2 space-y-1 text-sm text-[#d6e3f8]">
+                          {order.items.map((item) => (
+                            <li key={`${order.id}-${item.itemId}`}>
+                              {item.quantity}x {item.name}
+                            </li>
+                          ))}
+                        </ul>
+                        {order.notes && <p className="mt-2 text-xs italic text-[#93a8c6]">Obs: {order.notes}</p>}
+                        <p className="mt-3 text-sm font-bold text-[#ff8c98]">{currency(order.total)}</p>
+                        <p className="mt-1 text-xs text-[#8db5ff]">Status: {statusLabel(order.status)}</p>
+                      </article>
+                    );
+                  })}
                 </div>
               </section>
             )}
