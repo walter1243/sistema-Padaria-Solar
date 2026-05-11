@@ -13,12 +13,13 @@ export async function PUT(request: Request, { params }: Params) {
     : undefined;
 
   const updated = updateMenuItem(id, {
-    name: body.name,
-    description: body.description,
-    price: body.price,
-    category: body.category,
-    imageUrl: body.imageUrl,
-    available: body.available,
+    name: body.name ? String(body.name).trim() : undefined,
+    description: body.description ? String(body.description).trim() : undefined,
+    price: typeof body.price === "number" ? body.price : undefined,
+    category: body.category ? String(body.category).trim() : undefined,
+    unit: body.unit,
+    imageUrl: body.imageUrl ? String(body.imageUrl).trim() : undefined,
+    available: typeof body.available === "boolean" ? body.available : undefined,
     addons,
   });
 

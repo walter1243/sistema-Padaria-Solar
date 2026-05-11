@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { addMenuItem, listMenu } from "@/lib/store";
-import { MenuCategory } from "@/lib/types";
+import { UnitMeasure } from "@/lib/types";
 
 export async function GET() {
   return NextResponse.json(listMenu());
@@ -17,13 +17,23 @@ export async function POST(request: Request) {
     name: String(body.name ?? "").trim(),
     description: String(body.description ?? "").trim(),
     price: Number(body.price ?? 0),
-    category: body.category as MenuCategory,
+    category: String(body.category ?? "").trim(),
+    unit: body.unit as UnitMeasure,
     imageUrl: String(body.imageUrl ?? "").trim(),
     available: Boolean(body.available ?? true),
     addons,
   };
 
-  if (!payload.name || !payload.description || !payload.imageUrl || payload.price <= 0) {
+  const validUnits: UnitMeasure[] = ["un", "kg", "g", "l", "ml"];
+
+  if (
+    !payload.name ||
+    !payload.description ||
+    !payload.imageUrl ||
+    !payload.category ||
+    payload.price <= 0 ||
+    !validUnits.includes(payload.unit)
+  ) {
     return NextResponse.json({ error: "Dados invalidos para criar item." }, { status: 400 });
   }
 

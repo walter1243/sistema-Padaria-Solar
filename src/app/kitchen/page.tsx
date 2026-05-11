@@ -166,7 +166,6 @@ export default function KitchenPage() {
         </div>
         <div className="mt-4 flex items-center gap-2 md:mt-0">
           <a href="/" className="text-sm font-bold text-[#d9e7ff]">Cardapio</a>
-          <a href="/admin" className="text-sm font-bold text-[#d9e7ff]">Admin</a>
           <button onClick={logout} className="rounded-lg border border-[#365682] bg-[#13233f] px-3 py-2 text-xs font-bold text-[#d9e7ff]">Sair</button>
         </div>
       </header>

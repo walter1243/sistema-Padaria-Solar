@@ -1,4 +1,4 @@
-import { MenuItem, Order, OrderStatus } from "@/lib/types";
+import { BakerUser, MenuItem, Order, OrderStatus } from "@/lib/types";
 
 const now = new Date().toISOString();
 
@@ -9,6 +9,7 @@ let menu: MenuItem[] = [
     description: "Pao frances dourado com manteiga de garrafa e toque de ervas.",
     price: 9.9,
     category: "Salgado",
+    unit: "un",
     imageUrl:
       "https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=900&q=80",
     available: true,
@@ -20,6 +21,7 @@ let menu: MenuItem[] = [
     description: "Hamburguer bovino, ovo cremoso, queijo e maionese da casa.",
     price: 24.9,
     category: "Lanche",
+    unit: "un",
     imageUrl:
       "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=900&q=80",
     available: true,
@@ -31,6 +33,7 @@ let menu: MenuItem[] = [
     description: "Espresso, leite gelado e espuma doce com canela.",
     price: 13.5,
     category: "Bebida",
+    unit: "un",
     imageUrl:
       "https://images.unsplash.com/photo-1517701604599-bb29b565090c?auto=format&fit=crop&w=900&q=80",
     available: true,
@@ -42,12 +45,20 @@ let menu: MenuItem[] = [
     description: "Fatia intensa com ganache e crocante de castanha.",
     price: 16.0,
     category: "Doce",
+    unit: "un",
     imageUrl:
       "https://images.unsplash.com/photo-1578985545062-69928b1d9587?auto=format&fit=crop&w=900&q=80",
     available: true,
     addons: ["Calda extra"],
   },
 ];
+
+let categories: string[] = ["Salgado", "Lanche", "Bebida", "Doce"];
+
+let bakerUser: BakerUser = {
+  username: process.env.KITCHEN_USERNAME || "padeiro",
+  password: process.env.KITCHEN_PASSWORD || "123456",
+};
 
 let orders: Order[] = [
   {
@@ -68,6 +79,9 @@ export function listMenu() {
 
 export function addMenuItem(item: Omit<MenuItem, "id">) {
   const newItem: MenuItem = { ...item, id: crypto.randomUUID() };
+  if (!categories.includes(newItem.category)) {
+    categories = [...categories, newItem.category];
+  }
   menu = [newItem, ...menu];
   return newItem;
 }
@@ -86,6 +100,43 @@ export function deleteMenuItem(id: string) {
   const prevLength = menu.length;
   menu = menu.filter((m) => m.id !== id);
   return prevLength !== menu.length;
+}
+
+export function listCategories() {
+  return [...categories].sort((a, b) => a.localeCompare(b, "pt-BR"));
+}
+
+export function addCategory(name: string) {
+  const normalized = name.trim();
+  if (!normalized) return null;
+  const exists = categories.some((category) => category.toLowerCase() === normalized.toLowerCase());
+  if (exists) return normalized;
+  categories = [...categories, normalized];
+  return normalized;
+}
+
+export function deleteCategory(name: string) {
+  const normalized = name.trim().toLowerCase();
+  const isUsed = menu.some((item) => item.category.trim().toLowerCase() === normalized);
+  if (isUsed) {
+    return { removed: false, reason: "used" as const };
+  }
+
+  const previousLength = categories.length;
+  categories = categories.filter((category) => category.trim().toLowerCase() !== normalized);
+  return { removed: previousLength !== categories.length, reason: "ok" as const };
+}
+
+export function getBakerUser() {
+  return bakerUser;
+}
+
+export function updateBakerUser(next: BakerUser) {
+  bakerUser = {
+    username: next.username.trim(),
+    password: next.password,
+  };
+  return bakerUser;
 }
 
 export function listOrders() {

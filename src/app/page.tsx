@@ -16,7 +16,6 @@ type CartLine = {
   selectedAddons: string[];
 };
 
-const CATEGORIES: MenuCategory[] = ["Salgado", "Lanche", "Bebida", "Doce"];
 const ADDON_PRICE = 2.5;
 
 function currency(value: number) {
@@ -110,19 +109,21 @@ function HomePageContent() {
   }, [menu, selectedCategory, searchQuery]);
 
   const menuByCategory = useMemo(() => {
-    const grouped: Record<MenuCategory, MenuItem[]> = {
-      Salgado: [],
-      Lanche: [],
-      Bebida: [],
-      Doce: [],
-    };
+    const grouped: Record<string, MenuItem[]> = {};
 
     filteredMenu.forEach((item) => {
+      if (!grouped[item.category]) {
+        grouped[item.category] = [];
+      }
       grouped[item.category].push(item);
     });
 
     return grouped;
   }, [filteredMenu]);
+
+  const categories = useMemo(() => {
+    return Object.keys(menuByCategory).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  }, [menuByCategory]);
 
   const quantityByItem = useMemo(() => {
     const map: Record<string, number> = {};
@@ -481,7 +482,7 @@ function HomePageContent() {
               >
                 Todos
               </button>
-              {CATEGORIES.map((cat) => (
+              {categories.map((cat) => (
                 <button
                   key={cat}
                   onClick={() => {

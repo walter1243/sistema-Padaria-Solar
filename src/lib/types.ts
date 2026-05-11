@@ -1,4 +1,6 @@
-export type MenuCategory = "Salgado" | "Lanche" | "Bebida" | "Doce";
+export type MenuCategory = string;
+
+export type UnitMeasure = "un" | "kg" | "g" | "l" | "ml";
 
 export type MenuItem = {
   id: string;
@@ -6,9 +8,15 @@ export type MenuItem = {
   description: string;
   price: number;
   category: MenuCategory;
+  unit: UnitMeasure;
   imageUrl: string;
   available: boolean;
   addons?: string[];
+};
+
+export type BakerUser = {
+  username: string;
+  password: string;
 };
 
 export type OrderStatus = "novo" | "preparando" | "pronto" | "entregue";
