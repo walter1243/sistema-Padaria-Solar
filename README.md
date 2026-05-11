@@ -30,14 +30,16 @@ Acesse `http://localhost:3000`.
 Crie um arquivo `.env.local` baseado em `.env.example`:
 
 ```env
-NEXT_PUBLIC_ADMIN_PASSWORD=123456
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=123456
+ADMIN_SESSION_TOKEN=troque-por-um-token-forte
 ```
 
 ## Deploy na Vercel
 
 1. Suba o projeto para um repositorio GitHub.
 2. Importe o repositorio na Vercel.
-3. Configure a variavel de ambiente `NEXT_PUBLIC_ADMIN_PASSWORD`.
+3. Configure as variaveis `ADMIN_USERNAME`, `ADMIN_PASSWORD` e `ADMIN_SESSION_TOKEN`.
 4. Deploy.
 
 ## Observacao importante

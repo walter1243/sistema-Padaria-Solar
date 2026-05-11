@@ -22,7 +22,9 @@ function statusLabel(status: OrderStatus) {
 export default function AdminPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [authorized, setAuthorized] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [error, setError] = useState("");
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -35,9 +37,6 @@ export default function AdminPage() {
   const [imageUrl, setImageUrl] = useState("");
   const [addonsText, setAddonsText] = useState("");
 
-  const expectedUser = "admin";
-  const expectedPassword = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "123456";
-
   async function loadData() {
     const [menuRes, ordersRes] = await Promise.all([
       fetch("/api/menu", { cache: "no-store" }),
@@ -49,6 +48,19 @@ export default function AdminPage() {
     setMenu(menuData);
     setOrders(orderData);
   }
+
+  useEffect(() => {
+    async function checkSession() {
+      try {
+        const res = await fetch("/api/admin/session", { cache: "no-store" });
+        setAuthorized(res.ok);
+      } finally {
+        setCheckingSession(false);
+      }
+    }
+
+    checkSession();
+  }, []);
 
   useEffect(() => {
     if (!authorized) return;
@@ -68,15 +80,37 @@ export default function AdminPage() {
     }));
   }, [orders]);
 
-  function login(e: FormEvent) {
+  async function login(e: FormEvent) {
     e.preventDefault();
-    const isValid = username.trim().toLowerCase() === expectedUser && password === expectedPassword;
-    if (isValid) {
+    const res = await fetch("/api/admin/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+
+    if (res.ok) {
       setAuthorized(true);
       setError("");
+      setPassword("");
       return;
     }
+
     setError("Usuario ou senha invalidos.");
+  }
+
+  async function logout() {
+    await fetch("/api/admin/login", { method: "DELETE" });
+    setAuthorized(false);
+    setUsername("");
+    setPassword("");
+  }
+
+  if (checkingSession) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#060b14] text-[#d6e3f8]">
+        <p className="text-sm font-semibold uppercase tracking-[0.14em]">Carregando painel...</p>
+      </main>
+    );
   }
 
   async function addMenu(e: FormEvent) {
@@ -146,50 +180,59 @@ export default function AdminPage() {
     return (
       <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#060b14] px-4 py-10 text-[#eef4ff]">
         <div
-          className="absolute inset-0 bg-cover bg-center opacity-35"
+          className="absolute inset-0 bg-cover bg-center"
           style={{
             backgroundImage:
-              "url('https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=1600&q=80')",
+              "url('https://images.unsplash.com/photo-1481437156560-3205f6a55735?auto=format&fit=crop&w=1800&q=80')",
           }}
         />
-        <div className="absolute inset-0 bg-gradient-to-br from-[#020918]/90 via-[#0d2e70]/80 to-[#8f1722]/75" />
+        <div className="absolute inset-0 bg-[#020917]/58" />
 
         <form
           onSubmit={login}
-          className="relative z-10 w-full max-w-md rounded-3xl border border-[#284163] bg-[#0b1424]/95 p-6 shadow-[0_18px_40px_rgba(0,0,0,0.55)] backdrop-blur-sm"
+          className="relative z-10 w-full max-w-md rounded-3xl border border-white/12 bg-black/68 p-6 shadow-[0_20px_40px_rgba(0,0,0,0.6)] backdrop-blur-[2px]"
         >
-          <p className="text-sm font-bold uppercase tracking-[0.14em] text-[#8db5ff]">Painel Administrativo</p>
-          <h1 className="mt-2 text-5xl leading-none text-white">Padaria Solar</h1>
-          <p className="mt-2 text-sm text-[#afc3e0]">Acesso de gestao do cardapio e dos pedidos em tempo real.</p>
+          <div className="mx-auto flex h-12 w-36 items-center justify-center rounded-lg bg-gradient-to-r from-[#123875] to-[#b32130] text-sm font-black text-[#ffd35b]">
+            SOLAR
+          </div>
 
-          <div className="mt-5 space-y-2">
-            <label className="text-xs font-bold uppercase tracking-[0.12em] text-[#9bb0d0]">Usuario</label>
+          <h1 className="mt-5 text-center text-4xl leading-none text-white">Painel Admin</h1>
+          <p className="mt-2 text-center text-sm text-white/80">Acesse para gerenciar pedidos e entregas.</p>
+
+          <div className="mt-6 space-y-2">
             <input
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               placeholder="admin"
-              className="w-full rounded-xl border border-[#2e476f] bg-[#091426] px-3 py-2 text-[#eef4ff] outline-none focus:border-[#0f5bd4]"
+              className="w-full rounded-xl border border-white/15 bg-black/40 px-4 py-3 text-white outline-none placeholder:text-white/60 focus:border-[#f7bf3f]"
             />
           </div>
 
-          <div className="mt-4 space-y-2">
-            <label className="text-xs font-bold uppercase tracking-[0.12em] text-[#9bb0d0]">Senha</label>
+          <div className="relative mt-3">
             <input
-              type="password"
+              type={showPassword ? "text" : "password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Digite a senha"
-              className="w-full rounded-xl border border-[#2e476f] bg-[#091426] px-3 py-2 text-[#eef4ff] outline-none focus:border-[#0f5bd4]"
+              placeholder="Senha"
+              className="w-full rounded-xl border border-white/15 bg-black/40 px-4 py-3 pr-10 text-white outline-none placeholder:text-white/60 focus:border-[#f7bf3f]"
             />
+            <button
+              type="button"
+              onClick={() => setShowPassword((prev) => !prev)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-white/70"
+              aria-label="Mostrar senha"
+            >
+              {showPassword ? "◐" : "◉"}
+            </button>
           </div>
 
-          <button className="mt-5 w-full rounded-xl bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] px-4 py-3 font-bold text-white">
+          <button className="mt-4 w-full rounded-xl bg-[#f7b731] px-4 py-3 font-black text-black hover:brightness-95">
             Entrar
           </button>
 
           {error && <p className="mt-3 text-sm font-semibold text-[#ff8c98]">{error}</p>}
 
-          <p className="mt-4 text-xs text-[#9bb0d0]">Usuario: admin | Senha via NEXT_PUBLIC_ADMIN_PASSWORD.</p>
+          <p className="mt-4 text-center text-xs text-white/60">Usuario: admin | Senha via ADMIN_PASSWORD.</p>
         </form>
       </main>
     );
@@ -208,9 +251,17 @@ export default function AdminPage() {
           <p className="text-sm font-bold uppercase tracking-[0.14em] text-[#8db5ff]">Area Administrativa</p>
           <h1 className="mt-2 text-6xl leading-none text-white">Controle da Padaria Solar</h1>
         </div>
-        <a href="/" className="mt-4 inline-block text-sm font-bold text-[#d9e7ff] md:mt-0">
-          Voltar para cardapio
-        </a>
+        <div className="mt-4 flex items-center gap-2 md:mt-0">
+          <a href="/" className="inline-block text-sm font-bold text-[#d9e7ff]">
+            Voltar para cardapio
+          </a>
+          <button
+            onClick={logout}
+            className="rounded-lg border border-[#365682] bg-[#13233f] px-3 py-2 text-xs font-bold text-[#d9e7ff]"
+          >
+            Sair
+          </button>
+        </div>
       </header>
 
       <section className="mt-6 grid gap-6 lg:grid-cols-[360px_1fr]">
