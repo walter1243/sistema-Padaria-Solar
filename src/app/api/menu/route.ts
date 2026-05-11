@@ -8,6 +8,10 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const body = await request.json();
+  const rawAddons: unknown[] = Array.isArray(body.addons) ? body.addons : [];
+  const addons = rawAddons
+    .map((value: unknown) => String(value ?? "").trim())
+    .filter((value: string) => value.length > 0);
 
   const payload = {
     name: String(body.name ?? "").trim(),
@@ -16,6 +20,7 @@ export async function POST(request: Request) {
     category: body.category as MenuCategory,
     imageUrl: String(body.imageUrl ?? "").trim(),
     available: Boolean(body.available ?? true),
+    addons,
   };
 
   if (!payload.name || !payload.description || !payload.imageUrl || payload.price <= 0) {

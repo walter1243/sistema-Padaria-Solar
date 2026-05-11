@@ -8,6 +8,7 @@ export type MenuItem = {
   category: MenuCategory;
   imageUrl: string;
   available: boolean;
+  addons?: string[];
 };
 
 export type OrderStatus = "novo" | "preparando" | "pronto" | "entregue";

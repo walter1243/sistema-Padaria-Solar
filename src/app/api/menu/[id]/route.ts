@@ -6,6 +6,11 @@ type Params = { params: Promise<{ id: string }> };
 export async function PUT(request: Request, { params }: Params) {
   const { id } = await params;
   const body = await request.json();
+  const addons = Array.isArray(body.addons)
+    ? body.addons
+        .map((value: unknown) => String(value ?? "").trim())
+        .filter((value: string) => value.length > 0)
+    : undefined;
 
   const updated = updateMenuItem(id, {
     name: body.name,
@@ -14,6 +19,7 @@ export async function PUT(request: Request, { params }: Params) {
     category: body.category,
     imageUrl: body.imageUrl,
     available: body.available,
+    addons,
   });
 
   if (!updated) {

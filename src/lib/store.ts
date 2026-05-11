@@ -12,6 +12,7 @@ let menu: MenuItem[] = [
     imageUrl:
       "https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=900&q=80",
     available: true,
+    addons: ["Requeijao", "Queijo extra"],
   },
   {
     id: "m2",
@@ -22,6 +23,7 @@ let menu: MenuItem[] = [
     imageUrl:
       "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=900&q=80",
     available: true,
+    addons: ["Bacon", "Queijo cheddar", "Molho especial"],
   },
   {
     id: "m3",
@@ -32,6 +34,7 @@ let menu: MenuItem[] = [
     imageUrl:
       "https://images.unsplash.com/photo-1517701604599-bb29b565090c?auto=format&fit=crop&w=900&q=80",
     available: true,
+    addons: ["Chantilly", "Canela", "Caramelo"],
   },
   {
     id: "m4",
@@ -42,6 +45,7 @@ let menu: MenuItem[] = [
     imageUrl:
       "https://images.unsplash.com/photo-1578985545062-69928b1d9587?auto=format&fit=crop&w=900&q=80",
     available: true,
+    addons: ["Calda extra"],
   },
 ];
 

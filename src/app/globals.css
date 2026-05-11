@@ -55,6 +55,14 @@ textarea {
   animation: fade-up 0.5s ease both;
 }
 
+.animate-cart-backdrop {
+  animation: cart-backdrop-in 0.2s ease-out both;
+}
+
+.animate-cart-sheet {
+  animation: cart-sheet-in 0.28s cubic-bezier(0.2, 0.9, 0.2, 1) both;
+}
+
 @keyframes fade-up {
   from {
     opacity: 0;
@@ -63,5 +71,25 @@ textarea {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes cart-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes cart-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }

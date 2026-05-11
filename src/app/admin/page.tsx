@@ -32,6 +32,7 @@ export default function AdminPage() {
   const [price, setPrice] = useState("");
   const [category, setCategory] = useState<MenuCategory>("Salgado");
   const [imageUrl, setImageUrl] = useState("");
+  const [addonsText, setAddonsText] = useState("");
 
   const expectedPin = process.env.NEXT_PUBLIC_ADMIN_PIN || "1234";
 
@@ -78,6 +79,11 @@ export default function AdminPage() {
   async function addMenu(e: FormEvent) {
     e.preventDefault();
 
+    const addons = addonsText
+      .split(",")
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+
     const res = await fetch("/api/menu", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -88,6 +94,7 @@ export default function AdminPage() {
         category,
         imageUrl,
         available: true,
+        addons,
       }),
     });
 
@@ -100,6 +107,7 @@ export default function AdminPage() {
     setDescription("");
     setPrice("");
     setImageUrl("");
+    setAddonsText("");
     setError("");
     loadData();
   }
@@ -210,6 +218,12 @@ export default function AdminPage() {
               required
               className="w-full rounded-xl border border-cafe/20 bg-white px-3 py-2"
             />
+            <input
+              value={addonsText}
+              onChange={(e) => setAddonsText(e.target.value)}
+              placeholder="Acompanhamentos (separados por virgula)"
+              className="w-full rounded-xl border border-cafe/20 bg-white px-3 py-2"
+            />
             <button className="w-full rounded-xl bg-gradient-to-r from-tomate to-mostarda px-4 py-3 font-bold text-white">
               Cadastrar Item
             </button>
@@ -227,6 +241,9 @@ export default function AdminPage() {
                     <span className="text-xs font-bold uppercase tracking-[0.1em] text-oliva">{item.category}</span>
                   </div>
                   <p className="mt-1 text-sm text-cafe/75">{item.description}</p>
+                  {item.addons && item.addons.length > 0 && (
+                    <p className="mt-2 text-xs text-cafe/70">Acompanhamentos: {item.addons.join(", ")}</p>
+                  )}
                   <p className="mt-2 text-sm font-bold">{currency(item.price)}</p>
                   <div className="mt-3 flex gap-2">
                     <button
