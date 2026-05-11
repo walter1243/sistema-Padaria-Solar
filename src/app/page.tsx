@@ -128,29 +128,32 @@ export default function HomePage() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-[#eef3fb] text-[#091426]">
+    <div className="flex h-screen flex-col bg-[#060b14] text-[#eef4ff]">
       {/* Banner Capa */}
       <section
-        className="relative h-44 w-full bg-cover bg-center"
+        className="relative h-48 w-full bg-cover bg-center"
         style={{
           backgroundImage: `url('https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=1400&q=80')`,
         }}
       >
-        <div className="absolute inset-0 bg-gradient-to-r from-[#041634]/85 via-[#0f3f91]/70 to-[#c81f2f]/75" />
+        <div className="absolute inset-0 bg-gradient-to-r from-[#020918]/90 via-[#0d2e70]/80 to-[#8f1722]/80" />
         <div className="relative flex h-full flex-col items-center justify-center px-4 text-center text-white">
-          <p className="text-[11px] font-extrabold uppercase tracking-[0.28em]">Capa Solar Supermercado</p>
-          <h1 className="mt-1 text-3xl leading-none">Padaria Solar</h1>
-          <p className="mt-2 text-xs font-semibold text-white/90">Cardapio profissional com pedidos em tempo real</p>
+          <div className="flex h-16 w-16 items-center justify-center rounded-full border border-white/60 bg-[#0a1a37]/65 text-lg font-bold shadow-lg">
+            PS
+          </div>
+          <h1 className="mt-3 text-4xl font-light tracking-[0.08em]" style={{ fontFamily: "var(--font-body)" }}>
+            Padaria Solar
+          </h1>
         </div>
       </section>
 
       {/* Header + Busca em Card */}
       <section className="-mt-6 px-3 pb-3">
-        <div className="rounded-2xl border border-[#d7e2f3] bg-white p-3 shadow-[0_10px_30px_rgba(15,63,145,0.14)]">
+        <div className="rounded-2xl border border-[#1e2e48] bg-[#0b1424] p-3 shadow-[0_10px_30px_rgba(0,0,0,0.45)]">
           <div className="flex items-center justify-between gap-2">
             <button
               onClick={() => setShowDrawer(true)}
-              className="rounded-xl border border-[#d8e1f0] bg-[#f7f9fe] p-2.5 text-[#0f3f91]"
+              className="rounded-xl border border-[#2c456d] bg-[#13233f] p-2.5 text-[#77a5ff]"
               aria-label="Abrir menu"
             >
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -158,14 +161,14 @@ export default function HomePage() {
               </svg>
             </button>
 
-            <h2 className="text-xl text-[#0a1730]">Padaria Solar</h2>
+            <div className="h-6" />
 
             <button
               onClick={() => {
                 setShowCart(true);
                 setCartStep("items");
               }}
-              className="relative rounded-xl border border-[#ffd4d8] bg-[#fff4f5] p-2.5 text-[#c81f2f]"
+              className="relative rounded-xl border border-[#2c456d] bg-[#13233f] p-2.5 text-[#ff5b6a]"
               aria-label="Abrir carrinho"
             >
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -184,7 +187,7 @@ export default function HomePage() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Buscar produto..."
-              className="w-full rounded-xl border-2 border-[#d2ddf0] bg-white px-4 py-2.5 text-sm font-semibold text-[#0a1730] outline-none placeholder:text-[#6a7790] focus:border-[#0f5bd4]"
+              className="w-full rounded-xl border-2 border-[#2e476f] bg-[#091426] px-4 py-2.5 text-sm font-semibold text-[#e8f1ff] outline-none placeholder:text-[#8ca6cd] focus:border-[#0f5bd4]"
             />
           </div>
         </div>
@@ -194,29 +197,29 @@ export default function HomePage() {
       <main className="flex-1 overflow-y-auto px-3 pb-6">
         {Object.entries(menuByCategory).map(([category, items]) =>
           items.length > 0 ? (
-            <section key={category} className="mb-5 rounded-2xl border border-[#d9e3f1] bg-white p-2 shadow-[0_6px_22px_rgba(4,22,52,0.07)]">
+            <section key={category} className="mb-5 rounded-2xl border border-[#1f314f] bg-[#0b1424] p-2 shadow-[0_6px_22px_rgba(0,0,0,0.45)]">
               <div className="rounded-xl bg-gradient-to-r from-[#0f3f91] to-[#0f5bd4] px-3 py-2 text-white">
                 <h3 className="text-xs font-extrabold uppercase tracking-[0.16em]">{category}</h3>
               </div>
 
               <div className="mt-2 grid grid-cols-2 gap-2">
                 {items.map((item) => (
-                  <article key={item.id} className="overflow-hidden rounded-xl border border-[#dbe5f3] bg-[#fbfdff]">
+                  <article key={item.id} className="overflow-hidden rounded-xl border border-[#213554] bg-[#0f1b30]">
                     <img src={item.imageUrl} alt={item.name} className="h-24 w-full object-cover" />
                     <div className="space-y-1 p-2">
                       <p className="line-clamp-1 text-[11px] font-bold uppercase tracking-wide text-[#0f5bd4]">{item.category}</p>
-                      <h4 className="line-clamp-2 text-sm font-extrabold leading-tight text-[#0a1730]">{item.name}</h4>
-                      <p className="line-clamp-1 text-[11px] text-[#5e6980]">{item.description}</p>
+                      <h4 className="line-clamp-2 text-sm font-extrabold leading-tight text-[#f2f7ff]">{item.name}</h4>
+                      <p className="line-clamp-1 text-[11px] text-[#9bb0d0]">{item.description}</p>
                       <div className="flex items-center justify-between pt-1">
                         <strong className="text-base font-black text-[#c81f2f]">{currency(item.price)}</strong>
                         <div className="flex items-center gap-1">
                           <button
                             onClick={() => removeItem(item.id)}
-                            className="h-7 w-7 rounded-full border border-[#cedaec] bg-white text-sm font-bold text-[#0f3f91]"
+                            className="h-7 w-7 rounded-full border border-[#2f466d] bg-[#13233f] text-sm font-bold text-[#8db5ff]"
                           >
                             -
                           </button>
-                          <span className="w-5 text-center text-xs font-bold text-[#0a1730]">{cart[item.id] || 0}</span>
+                          <span className="w-5 text-center text-xs font-bold text-[#e9f1ff]">{cart[item.id] || 0}</span>
                           <button
                             onClick={() => addItem(item.id)}
                             className="h-7 w-7 rounded-full bg-[#0f5bd4] text-sm font-bold text-white"
@@ -238,12 +241,12 @@ export default function HomePage() {
       {showDrawer && (
         <div className="fixed inset-0 z-40 bg-[#020817]/50" onClick={() => setShowDrawer(false)}>
           <div
-            className="absolute inset-y-0 left-0 w-72 bg-white shadow-2xl"
+            className="absolute inset-y-0 left-0 w-72 bg-[#0b1424] shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-[#dce5f2] p-4">
-              <h2 className="text-lg font-black text-[#0a1730]">Categorias</h2>
-              <button onClick={() => setShowDrawer(false)} className="rounded-lg p-1 text-[#0f3f91] hover:bg-[#edf3ff]">
+            <div className="flex items-center justify-between border-b border-[#1f314f] p-4">
+              <h2 className="text-lg font-black text-[#eef4ff]">Categorias</h2>
+              <button onClick={() => setShowDrawer(false)} className="rounded-lg p-1 text-[#8db5ff] hover:bg-[#13233f]">
                 ✕
               </button>
             </div>
@@ -255,8 +258,8 @@ export default function HomePage() {
                 }}
                 className={`w-full rounded-xl border px-4 py-3 text-left text-sm font-bold transition ${
                   !selectedCategory
-                    ? "border-[#c81f2f] bg-[#fff0f2] text-[#c81f2f]"
-                    : "border-[#e0e8f3] text-[#0a1730] hover:bg-[#f3f7ff]"
+                    ? "border-[#c81f2f] bg-[#35131a] text-[#ff6b78]"
+                    : "border-[#2b4062] text-[#e6f0ff] hover:bg-[#13233f]"
                 }`}
               >
                 Todos
@@ -270,8 +273,8 @@ export default function HomePage() {
                   }}
                   className={`w-full rounded-xl border px-4 py-3 text-left text-sm font-bold transition ${
                     selectedCategory === cat
-                      ? "border-[#0f5bd4] bg-[#edf4ff] text-[#0f5bd4]"
-                      : "border-[#e0e8f3] text-[#0a1730] hover:bg-[#f3f7ff]"
+                      ? "border-[#0f5bd4] bg-[#112849] text-[#8db5ff]"
+                      : "border-[#2b4062] text-[#e6f0ff] hover:bg-[#13233f]"
                   }`}
                 >
                   {cat}
@@ -286,20 +289,20 @@ export default function HomePage() {
       {showCart && (
         <div className="fixed inset-0 z-40 flex items-end bg-[#020817]/50" onClick={() => setShowCart(false)}>
           <div
-            className="w-full bg-white shadow-2xl"
+            className="w-full bg-[#0b1424] shadow-2xl"
             style={{ maxHeight: "90vh" }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Cart Header */}
-            <div className="flex items-center justify-between border-b border-[#dce5f2] p-4">
-              <h2 className="text-lg font-black text-[#0a1730]">Seu Pedido</h2>
-              <button onClick={() => setShowCart(false)} className="rounded-lg p-1 text-[#0f3f91] hover:bg-[#edf3ff]">
+            <div className="flex items-center justify-between border-b border-[#1f314f] p-4">
+              <h2 className="text-lg font-black text-[#eef4ff]">Seu Pedido</h2>
+              <button onClick={() => setShowCart(false)} className="rounded-lg p-1 text-[#8db5ff] hover:bg-[#13233f]">
                 ✕
               </button>
             </div>
 
             {/* Step Indicator */}
-            <div className="flex gap-2 border-b border-[#dce5f2] p-4">
+            <div className="flex gap-2 border-b border-[#1f314f] p-4">
               <button
                 onClick={() => setCartStep("items")}
                 className={`flex-1 rounded-lg py-2 text-xs font-bold transition ${
@@ -316,7 +319,7 @@ export default function HomePage() {
                     ? "bg-[#c81f2f] text-white"
                     : cartItems.length === 0
                       ? "bg-[#f1f4f9] text-[#93a0b8]"
-                      : "bg-[#edf4ff] text-[#0f3f91]"
+                      : "bg-[#13233f] text-[#8db5ff]"
                 }`}
               >
                 Info
@@ -329,7 +332,7 @@ export default function HomePage() {
                     ? "bg-[#c81f2f] text-white"
                     : !customerName.trim()
                       ? "bg-[#f1f4f9] text-[#93a0b8]"
-                      : "bg-[#edf4ff] text-[#0f3f91]"
+                      : "bg-[#13233f] text-[#8db5ff]"
                 }`}
               >
                 Confirmar
@@ -341,22 +344,22 @@ export default function HomePage() {
               {cartStep === "items" && (
                 <div className="space-y-3">
                   {cartItems.length === 0 ? (
-                    <p className="text-center text-sm text-[#5e6980]">Carrinho vazio</p>
+                    <p className="text-center text-sm text-[#9bb0d0]">Carrinho vazio</p>
                   ) : (
                     cartItems.map((item) => (
-                      <div key={item.id} className="flex items-center justify-between rounded-lg bg-[#f5f8ff] p-3">
+                      <div key={item.id} className="flex items-center justify-between rounded-lg bg-[#13233f] p-3">
                         <div className="flex-1">
-                          <p className="text-sm font-bold text-[#0a1730]">{item.name}</p>
-                          <p className="text-xs text-[#647087]">Quantidade: {item.quantity}</p>
+                          <p className="text-sm font-bold text-[#eef4ff]">{item.name}</p>
+                          <p className="text-xs text-[#9bb0d0]">Quantidade: {item.quantity}</p>
                         </div>
                         <strong className="text-sm text-[#c81f2f]">{currency(item.quantity * item.price)}</strong>
                       </div>
                     ))
                   )}
                   {cartItems.length > 0 && (
-                    <div className="mt-4 rounded-lg bg-[#edf4ff] p-3">
+                    <div className="mt-4 rounded-lg bg-[#13233f] p-3">
                       <div className="flex justify-between">
-                        <span className="font-bold text-[#0a1730]">Total</span>
+                        <span className="font-bold text-[#eef4ff]">Total</span>
                         <span className="text-lg font-bold text-[#c81f2f]">{currency(total)}</span>
                       </div>
                     </div>
@@ -367,21 +370,21 @@ export default function HomePage() {
               {cartStep === "info" && (
                 <div className="space-y-3">
                   <div>
-                    <label className="block text-xs font-bold text-[#5e6980]">Seu nome ou mesa *</label>
+                    <label className="block text-xs font-bold text-[#9bb0d0]">Seu nome ou mesa *</label>
                     <input
                       value={customerName}
                       onChange={(e) => setCustomerName(e.target.value)}
                       placeholder="Ex: Mesa 3"
-                      className="mt-1 w-full rounded-lg border border-[#d2ddf0] bg-white px-3 py-2 text-sm outline-none focus:border-[#0f5bd4]"
+                      className="mt-1 w-full rounded-lg border border-[#2e476f] bg-[#091426] px-3 py-2 text-sm text-[#eef4ff] outline-none focus:border-[#0f5bd4]"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-[#5e6980]">Observações (opcional)</label>
+                    <label className="block text-xs font-bold text-[#9bb0d0]">Observações (opcional)</label>
                     <textarea
                       value={notes}
                       onChange={(e) => setNotes(e.target.value)}
                       placeholder="Ex: Sem sal, extra crocante..."
-                      className="mt-1 h-20 w-full resize-none rounded-lg border border-[#d2ddf0] bg-white px-3 py-2 text-sm outline-none focus:border-[#0f5bd4]"
+                      className="mt-1 h-20 w-full resize-none rounded-lg border border-[#2e476f] bg-[#091426] px-3 py-2 text-sm text-[#eef4ff] outline-none focus:border-[#0f5bd4]"
                     />
                   </div>
                 </div>
@@ -389,15 +392,15 @@ export default function HomePage() {
 
               {cartStep === "confirm" && (
                 <div className="space-y-3">
-                  <div className="rounded-lg bg-[#edf4ff] p-3">
-                    <p className="text-xs font-bold text-[#5e6980]">Nome/Mesa</p>
-                    <p className="mt-1 text-sm font-bold text-[#0a1730]">{customerName}</p>
+                  <div className="rounded-lg bg-[#13233f] p-3">
+                    <p className="text-xs font-bold text-[#9bb0d0]">Nome/Mesa</p>
+                    <p className="mt-1 text-sm font-bold text-[#eef4ff]">{customerName}</p>
                   </div>
-                  <div className="rounded-lg bg-[#edf4ff] p-3">
-                    <p className="text-xs font-bold text-[#5e6980]">Itens do Pedido</p>
+                  <div className="rounded-lg bg-[#13233f] p-3">
+                    <p className="text-xs font-bold text-[#9bb0d0]">Itens do Pedido</p>
                     <ul className="mt-2 space-y-1">
                       {cartItems.map((item) => (
-                        <li key={item.id} className="flex justify-between text-sm text-[#0a1730]">
+                        <li key={item.id} className="flex justify-between text-sm text-[#eef4ff]">
                           <span>{item.quantity}x {item.name}</span>
                           <span className="font-bold">{currency(item.quantity * item.price)}</span>
                         </li>
@@ -405,14 +408,14 @@ export default function HomePage() {
                     </ul>
                   </div>
                   {notes && (
-                    <div className="rounded-lg bg-[#edf4ff] p-3">
-                      <p className="text-xs font-bold text-[#5e6980]">Obs</p>
-                      <p className="mt-1 text-sm text-[#0a1730]">{notes}</p>
+                    <div className="rounded-lg bg-[#13233f] p-3">
+                      <p className="text-xs font-bold text-[#9bb0d0]">Obs</p>
+                      <p className="mt-1 text-sm text-[#eef4ff]">{notes}</p>
                     </div>
                   )}
-                  <div className="rounded-lg border-t-2 border-[#c81f2f] bg-white p-3">
+                  <div className="rounded-lg border-t-2 border-[#c81f2f] bg-[#091426] p-3">
                     <div className="flex justify-between">
-                      <span className="font-bold text-[#0a1730]">Total a Pagar</span>
+                      <span className="font-bold text-[#eef4ff]">Total a Pagar</span>
                       <span className="text-2xl font-bold text-[#c81f2f]">{currency(total)}</span>
                     </div>
                   </div>
@@ -420,14 +423,14 @@ export default function HomePage() {
               )}
 
               {message && (
-                <div className="mt-3 rounded-lg bg-[#edf4ff] p-3">
-                  <p className="text-center text-xs font-bold text-[#0a1730]">{message}</p>
+                <div className="mt-3 rounded-lg bg-[#13233f] p-3">
+                  <p className="text-center text-xs font-bold text-[#eaf2ff]">{message}</p>
                 </div>
               )}
             </div>
 
             {/* Footer */}
-            <div className="border-t border-[#dce5f2] p-4">
+            <div className="border-t border-[#1f314f] p-4">
               {cartStep === "items" && (
                 <button
                   onClick={() => cartItems.length > 0 && setCartStep("info")}
