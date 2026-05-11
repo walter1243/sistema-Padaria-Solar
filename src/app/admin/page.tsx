@@ -77,6 +77,7 @@ export default function AdminPage() {
   const [reports, setReports] = useState<ReportsSummary | null>(null);
   const [showProductForm, setShowProductForm] = useState(false);
   const [showKitchenAuthEditor, setShowKitchenAuthEditor] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Estados para edição e pesquisa
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
@@ -221,6 +222,11 @@ export default function AdminPage() {
     setAuthorized(false);
     setUsername("");
     setPassword("");
+  }
+
+  function openSection(section: AdminSection) {
+    setActiveSection(section);
+    setMobileMenuOpen(false);
   }
 
   function buildDraftFromForm(): ProductDraft {
@@ -542,8 +548,20 @@ export default function AdminPage() {
 
   return (
     <main className="min-h-screen flex bg-[#060b14] text-[#eef4ff]">
+      {mobileMenuOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/60 md:hidden"
+          onClick={() => setMobileMenuOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
       {/* Sidebar */}
-      <aside className="w-64 border-r border-[#244063] bg-[#0b1424] flex flex-col">
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 w-72 border-r border-[#244063] bg-[#0b1424] flex flex-col transform transition-transform duration-200 md:static md:w-64 md:translate-x-0 ${
+          mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
         {/* Logo */}
         <div className="border-b border-[#244063] p-4">
           <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#8db5ff]">Painel Admin</p>
@@ -553,7 +571,7 @@ export default function AdminPage() {
         {/* Navigation */}
         <nav className="flex-1 p-4 space-y-2">
           <button
-            onClick={() => setActiveSection("dashboard")}
+            onClick={() => openSection("dashboard")}
             className={`w-full text-left px-4 py-3 rounded-lg text-sm font-bold transition ${
               activeSection === "dashboard"
                 ? "bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] text-white"
@@ -563,7 +581,7 @@ export default function AdminPage() {
             Dashboard
           </button>
           <button
-            onClick={() => setActiveSection("menu")}
+            onClick={() => openSection("menu")}
             className={`w-full text-left px-4 py-3 rounded-lg text-sm font-bold transition ${
               activeSection === "menu"
                 ? "bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] text-white"
@@ -573,7 +591,7 @@ export default function AdminPage() {
             📦 Cadastro de Produtos
           </button>
           <button
-            onClick={() => setActiveSection("tables")}
+            onClick={() => openSection("tables")}
             className={`w-full text-left px-4 py-3 rounded-lg text-sm font-bold transition ${
               activeSection === "tables"
                 ? "bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] text-white"
@@ -583,7 +601,7 @@ export default function AdminPage() {
             🪑 Mesas
           </button>
           <button
-            onClick={() => setActiveSection("orders")}
+            onClick={() => openSection("orders")}
             className={`w-full text-left px-4 py-3 rounded-lg text-sm font-bold transition ${
               activeSection === "orders"
                 ? "bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] text-white"
@@ -593,7 +611,7 @@ export default function AdminPage() {
             📋 Pedidos
           </button>
           <button
-            onClick={() => setActiveSection("reports")}
+            onClick={() => openSection("reports")}
             className={`w-full text-left px-4 py-3 rounded-lg text-sm font-bold transition ${
               activeSection === "reports"
                 ? "bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] text-white"
@@ -643,6 +661,7 @@ export default function AdminPage() {
         <div className="border-t border-[#244063] p-4 space-y-2">
           <a
             href="/"
+            onClick={() => setMobileMenuOpen(false)}
             className="block w-full text-center px-4 py-2 rounded-lg border border-[#365682] bg-[#13233f] text-xs font-bold text-[#d9e7ff] hover:bg-[#1a2f50] transition"
             title="Cardápio do cliente"
           >
@@ -650,13 +669,17 @@ export default function AdminPage() {
           </a>
           <a
             href="/kitchen"
+            onClick={() => setMobileMenuOpen(false)}
             className="block w-full text-center px-4 py-2 rounded-lg border border-[#c81f2f] bg-[#c81f2f]/10 text-xs font-bold text-[#ff8c98] hover:bg-[#c81f2f]/20 transition"
             title="Painel separado da cozinha"
           >
             👨‍🍳 Padaria
           </a>
           <button
-            onClick={logout}
+            onClick={() => {
+              setMobileMenuOpen(false);
+              logout();
+            }}
             className="w-full px-4 py-2 rounded-lg border border-[#365682] bg-[#13233f] text-xs font-bold text-[#d9e7ff] hover:bg-[#1a2f50] transition"
           >
             🚪 Sair
@@ -665,12 +688,22 @@ export default function AdminPage() {
       </aside>
 
       {/* Main Content */}
-      <div className="flex-1 overflow-auto">
-        <div className="min-h-screen p-6">
+      <div className="flex-1 overflow-auto md:ml-0">
+        <div className="min-h-screen p-4 md:p-6">
           {/* Header */}
           <header className="mb-6">
+            <div className="mb-3 flex items-center justify-between md:hidden">
+              <button
+                type="button"
+                onClick={() => setMobileMenuOpen(true)}
+                className="rounded-lg border border-[#365682] bg-[#13233f] px-3 py-2 text-xs font-bold text-[#d9e7ff]"
+              >
+                Menu
+              </button>
+              <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#8db5ff]">Padaria Solar</p>
+            </div>
             <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#8db5ff]">Painel Administrativo</p>
-            <h1 className="text-4xl font-bold text-white mt-2">
+            <h1 className="text-2xl font-bold text-white mt-2 md:text-4xl">
               {activeSection === "dashboard" && "Dashboard"}
               {activeSection === "menu" && "Cadastro de Produtos"}
               {activeSection === "tables" && "Mesas"}
