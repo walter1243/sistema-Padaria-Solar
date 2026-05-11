@@ -5,7 +5,7 @@ import { MenuCategory, MenuItem, Order, OrderStatus, UnitMeasure } from "@/lib/t
 
 const statusFlow: OrderStatus[] = ["novo", "preparando", "pronto", "entregue"];
 
-type AdminSection = "menu" | "tables" | "orders";
+type AdminSection = "dashboard" | "menu" | "tables" | "orders";
 
 type ProductDraft = {
   name: string;
@@ -59,7 +59,7 @@ export default function AdminPage() {
   const [imageUrl, setImageUrl] = useState("");
   const [addonsText, setAddonsText] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
-  const [activeSection, setActiveSection] = useState<AdminSection>("menu");
+  const [activeSection, setActiveSection] = useState<AdminSection>("dashboard");
   const [formNotice, setFormNotice] = useState("");
   const [categories, setCategories] = useState<string[]>([]);
   const [kitchenUser, setKitchenUser] = useState("");
@@ -72,6 +72,7 @@ export default function AdminPage() {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteItemId, setDeleteItemId] = useState<string | null>(null);
   const [deletePassword, setDeletePassword] = useState("");
+  const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
 
   async function loadData() {
     const [menuRes, ordersRes, categoriesRes, bakerRes] = await Promise.all([
@@ -153,6 +154,28 @@ export default function AdminPage() {
 
     return Object.values(map).sort((a, b) => a.tableId.localeCompare(b.tableId, "pt-BR", { numeric: true }));
   }, [orders]);
+
+  const dashboardMetrics = useMemo(() => {
+    const deliveredOrders = orders.filter((order) => order.status === "entregue");
+    const totalRevenue = deliveredOrders.reduce((acc, order) => acc + order.total, 0);
+    const soldItems = deliveredOrders.reduce(
+      (acc, order) => acc + order.items.reduce((sum, item) => sum + item.quantity, 0),
+      0,
+    );
+
+    return {
+      totalProducts: menu.length,
+      soldItems,
+      totalRevenue,
+      activeTables: tableSummaries.length,
+      openOrders: orders.filter((order) => order.status !== "entregue").length,
+    };
+  }, [menu.length, orders, tableSummaries.length]);
+
+  const selectedTableSummary = useMemo(() => {
+    if (!selectedTableId) return null;
+    return tableSummaries.find((table) => table.tableId === selectedTableId) || null;
+  }, [selectedTableId, tableSummaries]);
 
   async function login(e: FormEvent) {
     e.preventDefault();
@@ -504,6 +527,16 @@ export default function AdminPage() {
         {/* Navigation */}
         <nav className="flex-1 p-4 space-y-2">
           <button
+            onClick={() => setActiveSection("dashboard")}
+            className={`w-full text-left px-4 py-3 rounded-lg text-sm font-bold transition ${
+              activeSection === "dashboard"
+                ? "bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] text-white"
+                : "text-[#d3e4ff] hover:bg-[#13233f]"
+            }`}
+          >
+            Dashboard
+          </button>
+          <button
             onClick={() => setActiveSection("menu")}
             className={`w-full text-left px-4 py-3 rounded-lg text-sm font-bold transition ${
               activeSection === "menu"
@@ -567,6 +600,7 @@ export default function AdminPage() {
           <header className="mb-6">
             <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#8db5ff]">Painel Administrativo</p>
             <h1 className="text-4xl font-bold text-white mt-2">
+              {activeSection === "dashboard" && "Dashboard"}
               {activeSection === "menu" && "Cadastro de Produtos"}
               {activeSection === "tables" && "Mesas"}
               {activeSection === "orders" && "Pedidos"}
@@ -574,6 +608,40 @@ export default function AdminPage() {
           </header>
 
           <section className="space-y-4">
+            {activeSection === "dashboard" && (
+              <section className="space-y-4">
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+                  <article className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">Produtos cadastrados</p>
+                    <p className="mt-2 text-3xl font-black text-white">{dashboardMetrics.totalProducts}</p>
+                  </article>
+                  <article className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">Produtos vendidos</p>
+                    <p className="mt-2 text-3xl font-black text-white">{dashboardMetrics.soldItems}</p>
+                  </article>
+                  <article className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">Lucro realizado</p>
+                    <p className="mt-2 text-3xl font-black text-[#ff8c98]">{currency(dashboardMetrics.totalRevenue)}</p>
+                  </article>
+                  <article className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">Mesas ocupadas</p>
+                    <p className="mt-2 text-3xl font-black text-white">{dashboardMetrics.activeTables}</p>
+                  </article>
+                  <article className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">Pedidos abertos</p>
+                    <p className="mt-2 text-3xl font-black text-white">{dashboardMetrics.openOrders}</p>
+                  </article>
+                </div>
+
+                <div className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
+                  <h2 className="text-2xl text-white">Acesso separado da cozinha</h2>
+                  <p className="mt-2 text-sm text-[#c2d4ef]">
+                    O padeiro usa o link externo /kitchen com login proprio. Esse perfil nao acessa o painel administrativo.
+                  </p>
+                </div>
+              </section>
+            )}
+
             {activeSection === "menu" && (
               <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
                 <form
@@ -822,7 +890,7 @@ export default function AdminPage() {
                 <div className="flex items-center justify-between">
                   <h2 className="text-3xl text-white">Mesas</h2>
                   <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#8db5ff]">
-                    QR e conta em tempo real
+                    Acompanhamento em tempo real
                   </p>
                 </div>
 
@@ -832,20 +900,31 @@ export default function AdminPage() {
                     const orderLink = `${baseUrl}/?mesa=${tableId}`;
                     const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(orderLink)}`;
                     const summary = tableSummaries.find((table) => table.tableId === tableId);
+                    const isOccupied = Boolean(summary && summary.total > 0);
 
                     return (
                       <article key={tableId} className="rounded-2xl border border-[#2a4162] bg-[#101d33] p-3">
                         <div className="flex items-center justify-between">
                           <h3 className="text-xl text-white">Mesa {tableId}</h3>
-                          <span className="text-xs font-bold text-[#8db5ff]">{summary?.count || 0} pedidos</span>
+                          <span className={`text-xs font-bold ${isOccupied ? "text-[#ff8c98]" : "text-[#8fe0b8]"}`}>
+                            {isOccupied ? "Ocupada" : "Livre"}
+                          </span>
                         </div>
 
                         <img src={qrUrl} alt={`QR Mesa ${tableId}`} className="mx-auto mt-3 h-28 w-28 rounded-lg bg-white p-1" />
 
                         <p className="mt-3 text-xs text-[#9bb0d0]">Link: {orderLink}</p>
-                        <p className="mt-2 text-sm font-bold text-[#ff8c98]">
-                          Conta aberta: {currency(summary?.total || 0)}
+                        <p className="mt-2 text-xs text-[#9bb0d0]">Pedidos ativos: {summary?.count || 0}</p>
+                        <p className="mt-2 text-lg font-black text-[#ff8c98]">
+                          Total: {currency(summary?.total || 0)}
                         </p>
+
+                        <button
+                          onClick={() => setSelectedTableId(tableId)}
+                          className="mt-2 w-full rounded-lg border border-[#2e476f] bg-[#13233f] px-2 py-2 text-xs font-bold text-[#d3e4ff]"
+                        >
+                          Ver detalhes
+                        </button>
 
                         {summary && summary.total > 0 && (
                           <button
@@ -957,6 +1036,48 @@ export default function AdminPage() {
               >
                 Excluir
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedTableId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-2xl border border-[#365682] bg-[#0b1424] p-6 mx-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-2xl font-bold text-white">Detalhes da Mesa {selectedTableId}</h3>
+              <button
+                onClick={() => setSelectedTableId(null)}
+                className="rounded-lg border border-[#365682] bg-[#13233f] px-3 py-1 text-xs font-bold text-[#d9e7ff]"
+              >
+                Fechar
+              </button>
+            </div>
+
+            <p className="mt-3 text-sm text-[#b2c5e2]">Total acumulado: {currency(selectedTableSummary?.total || 0)}</p>
+
+            <div className="mt-4 max-h-[360px] space-y-2 overflow-y-auto pr-1">
+              {selectedTableSummary && selectedTableSummary.orders.length > 0 ? (
+                selectedTableSummary.orders.map((order) => (
+                  <article key={order.id} className="rounded-xl border border-[#2b4062] bg-[#101d33] p-3">
+                    <div className="flex items-center justify-between">
+                      <p className="font-bold text-[#eef4ff]">{order.customerName}</p>
+                      <p className="text-xs text-[#93a8c6]">{new Date(order.createdAt).toLocaleTimeString("pt-BR")}</p>
+                    </div>
+                    <ul className="mt-2 space-y-1 text-xs text-[#d6e3f8]">
+                      {order.items.map((item) => (
+                        <li key={`${order.id}-${item.itemId}`}>
+                          {item.quantity}x {item.name}
+                        </li>
+                      ))}
+                    </ul>
+                    {order.notes && <p className="mt-2 text-xs italic text-[#93a8c6]">Obs: {order.notes}</p>}
+                    <p className="mt-2 text-sm font-bold text-[#ff8c98]">{currency(order.total)}</p>
+                  </article>
+                ))
+              ) : (
+                <p className="text-sm text-[#93a8c6]">Nenhum consumo registrado para esta mesa.</p>
+              )}
             </div>
           </div>
         </div>
