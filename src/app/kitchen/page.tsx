@@ -7,7 +7,7 @@ const columns: OrderStatus[] = ["novo", "preparando", "pronto"];
 
 function statusTitle(status: OrderStatus) {
   const map: Record<OrderStatus, string> = {
-    novo: "Novo",
+    novo: "Recebido",
     preparando: "Preparando",
     pronto: "Pronto",
     entregue: "Entregue",
@@ -103,14 +103,11 @@ export default function KitchenPage() {
     setPassword("");
   }
 
-  async function nextStatus(order: Order) {
-    const index = columns.indexOf(order.status);
-    if (index >= columns.length - 1) return;
-
+  async function setStatus(order: Order, nextStatus: Exclude<OrderStatus, "entregue">) {
     await fetch(`/api/orders/${order.id}/status`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: columns[index + 1] }),
+      body: JSON.stringify({ status: nextStatus }),
     });
 
     loadOrders();
@@ -231,12 +228,38 @@ export default function KitchenPage() {
                     </p>
                   )}
 
-                  <button
-                    onClick={() => nextStatus(order)}
-                    className="mt-3 w-full rounded-lg bg-[#0f5bd4] px-3 py-2 text-sm font-black text-white hover:brightness-105"
-                  >
-                    Avancar status
-                  </button>
+                  <div className="mt-3 grid grid-cols-3 gap-2">
+                    <button
+                      onClick={() => setStatus(order, "novo")}
+                      className={`rounded-lg px-2 py-2 text-xs font-black ${
+                        order.status === "novo"
+                          ? "bg-[#c81f2f] text-white"
+                          : "border border-[#2f466d] bg-[#13233f] text-[#d9e7ff]"
+                      }`}
+                    >
+                      Recebido
+                    </button>
+                    <button
+                      onClick={() => setStatus(order, "preparando")}
+                      className={`rounded-lg px-2 py-2 text-xs font-black ${
+                        order.status === "preparando"
+                          ? "bg-[#0f5bd4] text-white"
+                          : "border border-[#2f466d] bg-[#13233f] text-[#d9e7ff]"
+                      }`}
+                    >
+                      Preparando
+                    </button>
+                    <button
+                      onClick={() => setStatus(order, "pronto")}
+                      className={`rounded-lg px-2 py-2 text-xs font-black ${
+                        order.status === "pronto"
+                          ? "bg-[#1f8b4c] text-white"
+                          : "border border-[#2f466d] bg-[#13233f] text-[#d9e7ff]"
+                      }`}
+                    >
+                      Pronto
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

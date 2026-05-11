@@ -955,7 +955,7 @@ export default function AdminPage() {
                 </div>
 
                 <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {Array.from({ length: 12 }).map((_, index) => {
+                  {Array.from({ length: 10 }).map((_, index) => {
                     const tableId = String(index + 1);
                     const orderLink = `${baseUrl}/?mesa=${tableId}`;
                     const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(orderLink)}`;

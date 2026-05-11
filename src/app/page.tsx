@@ -14,6 +14,7 @@ type CartLine = {
   basePrice: number;
   quantity: number;
   selectedAddons: string[];
+  lineNote: string;
 };
 
 const ADDON_PRICE = 2.5;
@@ -48,6 +49,7 @@ function HomePageContent() {
 
   const [addonModalItem, setAddonModalItem] = useState<MenuItem | null>(null);
   const [addonDraft, setAddonDraft] = useState<string[]>([]);
+  const [addonNoteDraft, setAddonNoteDraft] = useState("");
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
 
   async function loadMenu() {
@@ -146,17 +148,20 @@ function HomePageContent() {
     if (lineId) {
       const line = cartLines.find((cartLine) => cartLine.lineId === lineId);
       setAddonDraft(line?.selectedAddons ?? []);
+      setAddonNoteDraft(line?.lineNote ?? "");
       setEditingLineId(lineId);
       return;
     }
 
     setAddonDraft([]);
+    setAddonNoteDraft("");
     setEditingLineId(null);
   }
 
   function closeAddonModal() {
     setAddonModalItem(null);
     setAddonDraft([]);
+    setAddonNoteDraft("");
     setEditingLineId(null);
   }
 
@@ -169,12 +174,15 @@ function HomePageContent() {
     });
   }
 
-  function upsertLine(item: MenuItem, selectedAddons: string[]) {
+  function upsertLine(item: MenuItem, selectedAddons: string[], lineNote = "") {
     const newSignature = addonsSignature(selectedAddons);
 
     setCartLines((prev) => {
       const existing = prev.find(
-        (line) => line.itemId === item.id && addonsSignature(line.selectedAddons) === newSignature,
+        (line) =>
+          line.itemId === item.id &&
+          addonsSignature(line.selectedAddons) === newSignature &&
+          line.lineNote.trim() === lineNote.trim(),
       );
 
       if (existing) {
@@ -191,6 +199,7 @@ function HomePageContent() {
         basePrice: item.price,
         quantity: 1,
         selectedAddons,
+        lineNote: lineNote.trim(),
       };
 
       return [newLine, ...prev];
@@ -203,7 +212,7 @@ function HomePageContent() {
       return;
     }
 
-    upsertLine(item, []);
+    upsertLine(item, [], "");
   }
 
   function removeFromCatalog(itemId: string) {
@@ -242,14 +251,16 @@ function HomePageContent() {
     if (editingLineId) {
       setCartLines((prev) =>
         prev.map((line) =>
-          line.lineId === editingLineId ? { ...line, selectedAddons: addonDraft } : line,
+          line.lineId === editingLineId
+            ? { ...line, selectedAddons: addonDraft, lineNote: addonNoteDraft.trim() }
+            : line,
         ),
       );
       closeAddonModal();
       return;
     }
 
-    upsertLine(addonModalItem, addonDraft);
+    upsertLine(addonModalItem, addonDraft, addonNoteDraft);
     closeAddonModal();
   }
 
@@ -273,7 +284,14 @@ function HomePageContent() {
           : line.name,
       price: lineUnitPrice(line),
       quantity: line.quantity,
-    }));
+    })).map((item, index) => {
+      const line = cartLines[index];
+      if (!line?.lineNote?.trim()) return item;
+      return {
+        ...item,
+        name: `${item.name} (Obs: ${line.lineNote.trim()})`,
+      };
+    });
 
     try {
       setLoading(true);
@@ -528,6 +546,16 @@ function HomePageContent() {
                     {addon}
                   </button>
                 ))}
+
+                <div className="pt-1">
+                  <label className="mb-1 block text-xs font-bold text-[#9bb0d0]">Observacao do item (opcional)</label>
+                  <textarea
+                    value={addonNoteDraft}
+                    onChange={(e) => setAddonNoteDraft(e.target.value)}
+                    placeholder="Ex: Bem passado, sem molho..."
+                    className="h-20 w-full resize-none rounded-xl border border-[#2b4062] bg-[#0f1b30] px-3 py-2 text-sm text-[#d9e7ff] outline-none focus:border-[#0f5bd4]"
+                  />
+                </div>
               </div>
 
               <div className="mt-4 flex gap-2">
@@ -617,6 +645,9 @@ function HomePageContent() {
                                   <p className="mt-1 text-xs text-[#8db5ff]">
                                     + {line.selectedAddons.join(", ")}
                                   </p>
+                                )}
+                                {line.lineNote && (
+                                  <p className="mt-1 text-xs italic text-[#b7cbe8]">Obs item: {line.lineNote}</p>
                                 )}
                                 <p className="mt-1 text-xs text-[#9bb0d0]">
                                   Unitario: {currency(lineUnitPrice(line))}
@@ -718,6 +749,7 @@ function HomePageContent() {
                             <span>
                               {line.quantity}x {line.name}
                               {line.selectedAddons.length > 0 && ` + ${line.selectedAddons.join(", ")}`}
+                              {line.lineNote && ` (Obs: ${line.lineNote})`}
                             </span>
                             <span className="font-bold">{currency(lineUnitPrice(line) * line.quantity)}</span>
                           </li>
