@@ -182,8 +182,7 @@ export default function AdminPage() {
         <div
           className="absolute inset-0 bg-cover bg-center"
           style={{
-            backgroundImage:
-              "url('https://images.unsplash.com/photo-1481437156560-3205f6a55735?auto=format&fit=crop&w=1800&q=80')",
+            backgroundImage: "url('/images/capa-solar-supermercado.jpg')",
           }}
         />
         <div className="absolute inset-0 bg-[#020917]/58" />
@@ -192,18 +191,13 @@ export default function AdminPage() {
           onSubmit={login}
           className="relative z-10 w-full max-w-md rounded-3xl border border-white/12 bg-black/68 p-6 shadow-[0_20px_40px_rgba(0,0,0,0.6)] backdrop-blur-[2px]"
         >
-          <div className="mx-auto flex h-12 w-36 items-center justify-center rounded-lg bg-gradient-to-r from-[#123875] to-[#b32130] text-sm font-black text-[#ffd35b]">
-            SOLAR
-          </div>
-
-          <h1 className="mt-5 text-center text-4xl leading-none text-white">Painel Admin</h1>
-          <p className="mt-2 text-center text-sm text-white/80">Acesse para gerenciar pedidos e entregas.</p>
+          <h1 className="text-center text-5xl font-light leading-none tracking-[0.06em] text-white">Padaria Solar</h1>
 
           <div className="mt-6 space-y-2">
             <input
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="admin"
+              placeholder="Usuario"
               className="w-full rounded-xl border border-white/15 bg-black/40 px-4 py-3 text-white outline-none placeholder:text-white/60 focus:border-[#f7bf3f]"
             />
           </div>
@@ -231,8 +225,6 @@ export default function AdminPage() {
           </button>
 
           {error && <p className="mt-3 text-sm font-semibold text-[#ff8c98]">{error}</p>}
-
-          <p className="mt-4 text-center text-xs text-white/60">Usuario: admin | Senha via ADMIN_PASSWORD.</p>
         </form>
       </main>
     );
