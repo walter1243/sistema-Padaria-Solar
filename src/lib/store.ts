@@ -1,4 +1,4 @@
-import { BakerUser, MenuItem, Order, OrderStatus, PaymentMethod, PaymentRecord } from "@/lib/types";
+import { BakerUser, MenuItem, Order, OrderStatus, PaymentMethod, PaymentRecord, Addon } from "@/lib/types";
 
 const now = new Date().toISOString();
 
@@ -13,7 +13,10 @@ let menu: MenuItem[] = [
     imageUrl:
       "https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=900&q=80",
     available: true,
-    addons: ["Requeijao", "Queijo extra"],
+    addons: [
+      { name: "Requeijao", price: 2.5, description: "Requeijao cremoso" },
+      { name: "Queijo extra", price: 3.0, description: "Queijo meia cura" },
+    ],
   },
   {
     id: "m2",
@@ -25,7 +28,11 @@ let menu: MenuItem[] = [
     imageUrl:
       "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=900&q=80",
     available: true,
-    addons: ["Bacon", "Queijo cheddar", "Molho especial"],
+    addons: [
+      { name: "Bacon", price: 4.0, description: "Bacon crocante" },
+      { name: "Queijo cheddar", price: 3.5, description: "Queijo derretido" },
+      { name: "Molho especial", price: 1.5, description: "Maionese artesanal" },
+    ],
   },
   {
     id: "m3",
@@ -37,7 +44,11 @@ let menu: MenuItem[] = [
     imageUrl:
       "https://images.unsplash.com/photo-1517701604599-bb29b565090c?auto=format&fit=crop&w=900&q=80",
     available: true,
-    addons: ["Chantilly", "Canela", "Caramelo"],
+    addons: [
+      { name: "Chantilly", price: 2.0, description: "Cobertura de chantilly" },
+      { name: "Canela", price: 0.5, description: "Polvilho de canela" },
+      { name: "Caramelo", price: 1.5, description: "Calda de caramelo" },
+    ],
   },
   {
     id: "m4",
@@ -49,7 +60,9 @@ let menu: MenuItem[] = [
     imageUrl:
       "https://images.unsplash.com/photo-1578985545062-69928b1d9587?auto=format&fit=crop&w=900&q=80",
     available: true,
-    addons: ["Calda extra"],
+    addons: [
+      { name: "Calda extra", price: 2.0, description: "Mais ganache de chocolate" },
+    ],
   },
 ];
 

@@ -2,6 +2,12 @@ export type MenuCategory = string;
 
 export type UnitMeasure = "un" | "kg" | "g" | "l" | "ml";
 
+export type Addon = {
+  name: string;
+  price: number;
+  description: string;
+};
+
 export type MenuItem = {
   id: string;
   name: string;
@@ -11,7 +17,7 @@ export type MenuItem = {
   unit: UnitMeasure;
   imageUrl: string;
   available: boolean;
-  addons?: string[];
+  addons?: Addon[];
 };
 
 export type BakerUser = {

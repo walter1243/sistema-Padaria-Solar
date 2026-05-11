@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { MenuCategory, MenuItem, Order, OrderStatus, PaymentMethod, PaymentRecord, UnitMeasure } from "@/lib/types";
+import { MenuCategory, MenuItem, Order, OrderStatus, PaymentMethod, PaymentRecord, UnitMeasure, Addon } from "@/lib/types";
 
 const statusFlow: OrderStatus[] = ["novo", "preparando", "pronto", "entregue"];
 
@@ -24,7 +24,7 @@ type ProductDraft = {
   category: MenuCategory;
   unit: UnitMeasure;
   imageUrl: string;
-  addonsText: string;
+  addonsList: Addon[];
 };
 
 function currency(value: number) {
@@ -67,7 +67,10 @@ export default function AdminPage() {
   const [category, setCategory] = useState<MenuCategory>("Salgado");
   const [unit, setUnit] = useState<UnitMeasure>("un");
   const [imageUrl, setImageUrl] = useState("");
-  const [addonsText, setAddonsText] = useState("");
+  const [addonsList, setAddonsList] = useState<Addon[]>([]);
+  const [newAddonName, setNewAddonName] = useState("");
+  const [newAddonPrice, setNewAddonPrice] = useState("");
+  const [newAddonDesc, setNewAddonDesc] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [activeSection, setActiveSection] = useState<AdminSection>("dashboard");
   const [formNotice, setFormNotice] = useState("");
@@ -229,7 +232,7 @@ export default function AdminPage() {
     setCategory(draft.category || "Salgado");
     setUnit(draft.unit || "un");
     setImageUrl(draft.imageUrl || "");
-    setAddonsText(draft.addonsText || "");
+    setAddonsList(draft.addonsList || []);
   }
 
   function buildDraftFromItem(item: MenuItem): ProductDraft {
@@ -240,7 +243,7 @@ export default function AdminPage() {
       category: item.category,
       unit: item.unit,
       imageUrl: item.imageUrl,
-      addonsText: (item.addons || []).join(", "),
+      addonsList: item.addons || [],
     };
   }
 
@@ -292,11 +295,6 @@ export default function AdminPage() {
   async function addMenu(e: FormEvent) {
     e.preventDefault();
 
-    const addons = addonsText
-      .split(",")
-      .map((value) => value.trim())
-      .filter((value) => value.length > 0);
-
     const res = await fetch("/api/menu", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -308,7 +306,7 @@ export default function AdminPage() {
         unit,
         imageUrl,
         available: true,
-        addons,
+        addons: addonsList,
       }),
     });
 
@@ -322,7 +320,10 @@ export default function AdminPage() {
     setPrice("");
     setUnit("un");
     setImageUrl("");
-    setAddonsText("");
+    setAddonsList([]);
+    setNewAddonName("");
+    setNewAddonPrice("");
+    setNewAddonDesc("");
     setError("");
     setFormNotice("Item cadastrado com sucesso.");
     loadData();
@@ -371,11 +372,6 @@ export default function AdminPage() {
   async function updateItem() {
     if (!editingItemId) return;
 
-    const addons = addonsText
-      .split(",")
-      .map((value) => value.trim())
-      .filter((value) => value.length > 0);
-
     const res = await fetch(`/api/menu/${editingItemId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -387,7 +383,7 @@ export default function AdminPage() {
         unit,
         imageUrl,
         available: true,
-        addons,
+        addons: addonsList,
       }),
     });
 
@@ -401,7 +397,10 @@ export default function AdminPage() {
     setPrice("");
     setUnit("un");
     setImageUrl("");
-    setAddonsText("");
+    setAddonsList([]);
+    setNewAddonName("");
+    setNewAddonPrice("");
+    setNewAddonDesc("");
     setEditingItemId(null);
     setError("");
     setFormNotice("Item atualizado com sucesso.");
@@ -806,13 +805,76 @@ export default function AdminPage() {
                         </div>
                       )}
                     </div>
-                    <input
-                      value={addonsText}
-                      onChange={(e) => setAddonsText(e.target.value)}
-                      placeholder="Acompanhamentos (separados por virgula)"
-                      className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]"
-                    />
 
+                    {/* Acompanhamentos */}
+                    <div className="space-y-3">
+                      <h4 className="text-sm font-bold text-[#eef4ff]">Acompanhamentos</h4>
+                      
+                      {/* Lista de acompanhamentos */}
+                      <div className="space-y-2">
+                        {addonsList.map((addon, idx) => (
+                          <div key={idx} className="flex items-center gap-2 rounded-lg border border-[#2b4062] bg-[#101d33] p-2">
+                            <div className="flex-1 text-xs text-[#d6e3f8]">
+                              <p className="font-bold">{addon.name}</p>
+                              <p className="text-[#93a8c6]">{addon.description}</p>
+                              <p className="text-[#8db5ff] font-semibold">{currency(addon.price)}</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setAddonsList(addonsList.filter((_, i) => i !== idx))}
+                              className="rounded px-2 py-1 text-xs font-bold text-[#ff8c98] hover:bg-[#1a2a3f]"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Formulário para adicionar novo acompanhamento */}
+                      <div className="space-y-2 rounded-lg border border-[#2f466d] bg-[#091426] p-3">
+                        <input
+                          value={newAddonName}
+                          onChange={(e) => setNewAddonName(e.target.value)}
+                          placeholder="Nome do acompanhamento"
+                          className="w-full rounded-lg border border-[#1f3a52] bg-[#0a0f1a] px-2 py-1 text-xs text-[#eef4ff]"
+                        />
+                        <input
+                          value={newAddonPrice}
+                          onChange={(e) => setNewAddonPrice(e.target.value)}
+                          placeholder="Preço"
+                          type="number"
+                          step="0.01"
+                          className="w-full rounded-lg border border-[#1f3a52] bg-[#0a0f1a] px-2 py-1 text-xs text-[#eef4ff]"
+                        />
+                        <input
+                          value={newAddonDesc}
+                          onChange={(e) => setNewAddonDesc(e.target.value)}
+                          placeholder="Descrição"
+                          className="w-full rounded-lg border border-[#1f3a52] bg-[#0a0f1a] px-2 py-1 text-xs text-[#eef4ff]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (newAddonName.trim() && newAddonPrice.trim()) {
+                              setAddonsList([
+                                ...addonsList,
+                                {
+                                  name: newAddonName,
+                                  price: Number(newAddonPrice),
+                                  description: newAddonDesc,
+                                },
+                              ]);
+                              setNewAddonName("");
+                              setNewAddonPrice("");
+                              setNewAddonDesc("");
+                            }
+                          }}
+                          className="w-full rounded-lg bg-[#0f5bd4] px-2 py-1 text-xs font-bold text-white"
+                        >
+                          + Adicionar
+                        </button>
+                      </div>
+                    </div>
 
 
                     {editingItemId ? (
@@ -833,7 +895,10 @@ export default function AdminPage() {
                             setPrice("");
                             setUnit("un");
                             setImageUrl("");
-                            setAddonsText("");
+                            setAddonsList([]);
+                            setNewAddonName("");
+                            setNewAddonPrice("");
+                            setNewAddonDesc("");
                             setFormNotice("");
                           }}
                           className="flex-1 rounded-xl border border-[#2f466d] bg-[#13233f] px-4 py-3 font-bold text-[#d6e3f8]"

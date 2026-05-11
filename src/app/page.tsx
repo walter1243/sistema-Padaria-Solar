@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { MenuCategory, MenuItem, Order, OrderItem } from "@/lib/types";
+import { MenuCategory, MenuItem, Order, OrderItem, Addon } from "@/lib/types";
 
 type CartStep = "items" | "confirm";
 
@@ -13,22 +13,23 @@ type CartLine = {
   imageUrl: string;
   basePrice: number;
   quantity: number;
-  selectedAddons: string[];
+  selectedAddons: Addon[];
   lineNote: string;
 };
-
-const ADDON_PRICE = 2.5;
 
 function currency(value: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
 }
 
-function addonsSignature(addons: string[]) {
-  return [...addons].sort((a, b) => a.localeCompare(b)).join("|");
+function addonsSignature(addons: Addon[]) {
+  return [...addons].sort((a, b) => a.name.localeCompare(b.name)).map(a => a.name).join("|");
 }
 
-function lineUnitPrice(line: CartLine) {
-  return line.basePrice + line.selectedAddons.length * ADDON_PRICE;
+function lineUnitPrice(line: CartLine, item: MenuItem) {
+  const addonPrice = (line.selectedAddons ?? []).reduce((total, addon) => {
+    return total + addon.price;
+  }, 0);
+  return line.basePrice + addonPrice;
 }
 
 function HomePageContent() {
@@ -47,7 +48,7 @@ function HomePageContent() {
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
 
   const [addonModalItem, setAddonModalItem] = useState<MenuItem | null>(null);
-  const [addonDraft, setAddonDraft] = useState<string[]>([]);
+  const [addonDraft, setAddonDraft] = useState<Addon[]>([]);
   const [addonNoteDraft, setAddonNoteDraft] = useState("");
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
 
@@ -134,11 +135,22 @@ function HomePageContent() {
     return map;
   }, [cartLines]);
 
+  const itemsMap = useMemo(() => {
+    const map: Record<string, MenuItem> = {};
+    menu.forEach((item) => {
+      map[item.id] = item;
+    });
+    return map;
+  }, [menu]);
+
   const cartCount = useMemo(() => cartLines.reduce((acc, line) => acc + line.quantity, 0), [cartLines]);
 
   const total = useMemo(
-    () => cartLines.reduce((acc, line) => acc + lineUnitPrice(line) * line.quantity, 0),
-    [cartLines],
+    () => cartLines.reduce((acc, line) => {
+      const item = itemsMap[line.itemId];
+      return acc + (item ? lineUnitPrice(line, item) * line.quantity : 0);
+    }, 0),
+    [cartLines, itemsMap],
   );
 
   function openAddonModal(item: MenuItem, lineId?: string) {
@@ -164,16 +176,16 @@ function HomePageContent() {
     setEditingLineId(null);
   }
 
-  function toggleAddon(addon: string) {
+  function toggleAddon(addon: Addon) {
     setAddonDraft((prev) => {
-      if (prev.includes(addon)) {
-        return prev.filter((value) => value !== addon);
+      if (prev.some((a) => a.name === addon.name)) {
+        return prev.filter((a) => a.name !== addon.name);
       }
       return [...prev, addon];
     });
   }
 
-  function upsertLine(item: MenuItem, selectedAddons: string[], lineNote = "") {
+  function upsertLine(item: MenuItem, selectedAddons: Addon[], lineNote = "") {
     const newSignature = addonsSignature(selectedAddons);
 
     setCartLines((prev) => {
@@ -270,22 +282,28 @@ function HomePageContent() {
       return;
     }
 
-    const items: OrderItem[] = cartLines.map((line) => ({
-      itemId: line.itemId,
-      name:
-        line.selectedAddons.length > 0
-          ? `${line.name} + ${line.selectedAddons.join(", ")}`
-          : line.name,
-      price: lineUnitPrice(line),
-      quantity: line.quantity,
-    })).map((item, index) => {
-      const line = cartLines[index];
-      if (!line?.lineNote?.trim()) return item;
-      return {
-        ...item,
-        name: `${item.name} (Obs: ${line.lineNote.trim()})`,
-      };
-    });
+    const items: OrderItem[] = cartLines
+      .map((line) => {
+        const item = itemsMap[line.itemId];
+        const addonNames = line.selectedAddons.map((a) => a.name).join(", ");
+        return {
+          itemId: line.itemId,
+          name:
+            line.selectedAddons.length > 0
+              ? `${line.name} + ${addonNames}`
+              : line.name,
+          price: item ? lineUnitPrice(line, item) : line.basePrice,
+          quantity: line.quantity,
+        };
+      })
+      .map((item, index) => {
+        const line = cartLines[index];
+        if (!line?.lineNote?.trim()) return item;
+        return {
+          ...item,
+          name: `${item.name} (Obs: ${line.lineNote.trim()})`,
+        };
+      });
 
     try {
       setLoading(true);
@@ -523,20 +541,27 @@ function HomePageContent() {
             >
               <h3 className="text-lg font-black text-white">Acompanhamentos</h3>
               <p className="mt-1 text-sm text-[#9bb0d0]">{addonModalItem.name}</p>
-              <p className="mt-1 text-xs text-[#77a5ff]">Cada adicional: {currency(ADDON_PRICE)}</p>
 
               <div className="mt-4 space-y-2">
                 {(addonModalItem.addons ?? []).map((addon) => (
                   <button
-                    key={addon}
+                    key={addon.name}
                     onClick={() => toggleAddon(addon)}
                     className={`w-full rounded-xl border px-3 py-2 text-left text-sm font-semibold transition ${
-                      addonDraft.includes(addon)
+                      addonDraft.some((a) => a.name === addon.name)
                         ? "border-[#0f5bd4] bg-[#112849] text-[#cfe1ff]"
                         : "border-[#2b4062] bg-[#0f1b30] text-[#d9e7ff]"
                     }`}
                   >
-                    {addon}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-bold">{addon.name}</p>
+                        {addon.description && (
+                          <p className="text-xs text-[#a0b5d0]">{addon.description}</p>
+                        )}
+                      </div>
+                      <p className="font-bold text-[#8db5ff]">{currency(addon.price)}</p>
+                    </div>
                   </button>
                 ))}
 
@@ -623,18 +648,18 @@ function HomePageContent() {
                                 <p className="text-sm font-bold text-[#eef4ff]">{line.name}</p>
                                 {line.selectedAddons.length > 0 && (
                                   <p className="mt-1 text-xs text-[#8db5ff]">
-                                    + {line.selectedAddons.join(", ")}
+                                    + {line.selectedAddons.map((a) => a.name).join(", ")}
                                   </p>
                                 )}
                                 {line.lineNote && (
                                   <p className="mt-1 text-xs italic text-[#b7cbe8]">Obs item: {line.lineNote}</p>
                                 )}
                                 <p className="mt-1 text-xs text-[#9bb0d0]">
-                                  Unitario: {currency(lineUnitPrice(line))}
+                                  Unitario: {currency(item ? lineUnitPrice(line, item) : line.basePrice)}
                                 </p>
                               </div>
                               <strong className="text-sm text-[#ff6b78]">
-                                {currency(lineUnitPrice(line) * line.quantity)}
+                                {currency((item ? lineUnitPrice(line, item) : line.basePrice) * line.quantity)}
                               </strong>
                             </div>
 
@@ -699,16 +724,19 @@ function HomePageContent() {
                     <div className="rounded-lg bg-[#13233f] p-3">
                       <p className="text-xs font-bold text-[#9bb0d0]">Itens do Pedido</p>
                       <ul className="mt-2 space-y-1">
-                        {cartLines.map((line) => (
-                          <li key={line.lineId} className="flex justify-between text-sm text-[#eef4ff]">
-                            <span>
-                              {line.quantity}x {line.name}
-                              {line.selectedAddons.length > 0 && ` + ${line.selectedAddons.join(", ")}`}
-                              {line.lineNote && ` (Obs: ${line.lineNote})`}
-                            </span>
-                            <span className="font-bold">{currency(lineUnitPrice(line) * line.quantity)}</span>
-                          </li>
-                        ))}
+                        {cartLines.map((line) => {
+                          const item = itemsMap[line.itemId];
+                          return (
+                            <li key={line.lineId} className="flex justify-between text-sm text-[#eef4ff]">
+                              <span>
+                                {line.quantity}x {line.name}
+                                {line.selectedAddons.length > 0 && ` + ${line.selectedAddons.map((a) => a.name).join(", ")}`}
+                                {line.lineNote && ` (Obs: ${line.lineNote})`}
+                              </span>
+                              <span className="font-bold">{currency((item ? lineUnitPrice(line, item) : line.basePrice) * line.quantity)}</span>
+                            </li>
+                          );
+                        })}
                       </ul>
                     </div>
 
