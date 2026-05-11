@@ -57,6 +57,14 @@ export default function HomePage() {
     loadMenu();
   }, []);
 
+  useEffect(() => {
+    const timer = setInterval(() => {
+      loadMenu();
+    }, 5000);
+
+    return () => clearInterval(timer);
+  }, []);
+
   const filteredMenu = useMemo(() => {
     return menu.filter((item) => {
       const matchesCategory = !selectedCategory || item.category === selectedCategory;
@@ -282,8 +290,8 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="-mt-3 px-3 pb-3">
-        <div className="rounded-2xl border border-[#1e2e48] bg-[#0b1424] p-3 shadow-[0_10px_30px_rgba(0,0,0,0.45)]">
+      <section className="-mt-16 z-20 px-3 pb-3">
+        <div className="rounded-2xl border border-[#1e2e48] bg-[#0b1424]/95 p-3 shadow-[0_14px_34px_rgba(0,0,0,0.55)] backdrop-blur-sm">
           <div className="flex items-center justify-between gap-2">
             <button
               onClick={() => setShowDrawer(true)}
