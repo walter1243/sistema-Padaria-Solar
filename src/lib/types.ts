@@ -19,6 +19,16 @@ export type BakerUser = {
   password: string;
 };
 
+export type PaymentMethod = "dinheiro" | "pix" | "cartao";
+
+export type PaymentRecord = {
+  id: string;
+  tableId: string;
+  amount: number;
+  method: PaymentMethod;
+  closedAt: string;
+};
+
 export type OrderStatus = "novo" | "preparando" | "pronto" | "entregue";
 
 export type OrderItem = {

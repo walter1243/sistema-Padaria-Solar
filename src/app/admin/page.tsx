@@ -1,11 +1,21 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { MenuCategory, MenuItem, Order, OrderStatus, UnitMeasure } from "@/lib/types";
+import { MenuCategory, MenuItem, Order, OrderStatus, PaymentMethod, PaymentRecord, UnitMeasure } from "@/lib/types";
 
 const statusFlow: OrderStatus[] = ["novo", "preparando", "pronto", "entregue"];
 
-type AdminSection = "dashboard" | "menu" | "tables" | "orders";
+type AdminSection = "dashboard" | "menu" | "tables" | "orders" | "reports";
+
+type ReportsSummary = {
+  totalPaid: number;
+  totalsByMethod: {
+    dinheiro: number;
+    pix: number;
+    cartao: number;
+  };
+  payments: PaymentRecord[];
+};
 
 type ProductDraft = {
   name: string;
@@ -64,6 +74,9 @@ export default function AdminPage() {
   const [categories, setCategories] = useState<string[]>([]);
   const [kitchenUser, setKitchenUser] = useState("");
   const [kitchenPass, setKitchenPass] = useState("");
+  const [reports, setReports] = useState<ReportsSummary | null>(null);
+  const [showProductForm, setShowProductForm] = useState(false);
+  const [showKitchenAuthEditor, setShowKitchenAuthEditor] = useState(false);
 
   // Estados para edição e pesquisa
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
@@ -73,13 +86,16 @@ export default function AdminPage() {
   const [deleteItemId, setDeleteItemId] = useState<string | null>(null);
   const [deletePassword, setDeletePassword] = useState("");
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  const [closeTableId, setCloseTableId] = useState<string | null>(null);
+  const [closePaymentMethod, setClosePaymentMethod] = useState<PaymentMethod>("dinheiro");
 
   async function loadData() {
-    const [menuRes, ordersRes, categoriesRes, bakerRes] = await Promise.all([
+    const [menuRes, ordersRes, categoriesRes, bakerRes, reportsRes] = await Promise.all([
       fetch("/api/menu", { cache: "no-store" }),
       fetch("/api/orders", { cache: "no-store" }),
       fetch("/api/categories", { cache: "no-store" }),
       fetch("/api/baker/credentials", { cache: "no-store" }),
+      fetch("/api/reports/summary", { cache: "no-store" }),
     ]);
 
     const menuData = (await menuRes.json()) as MenuItem[];
@@ -95,6 +111,11 @@ export default function AdminPage() {
     if (bakerRes.ok) {
       const bakerData = (await bakerRes.json()) as { username: string };
       setKitchenUser(bakerData.username || "");
+    }
+
+    if (reportsRes.ok) {
+      const reportData = (await reportsRes.json()) as ReportsSummary;
+      setReports(reportData);
     }
   }
 
@@ -157,7 +178,6 @@ export default function AdminPage() {
 
   const dashboardMetrics = useMemo(() => {
     const deliveredOrders = orders.filter((order) => order.status === "entregue");
-    const totalRevenue = deliveredOrders.reduce((acc, order) => acc + order.total, 0);
     const soldItems = deliveredOrders.reduce(
       (acc, order) => acc + order.items.reduce((sum, item) => sum + item.quantity, 0),
       0,
@@ -166,11 +186,12 @@ export default function AdminPage() {
     return {
       totalProducts: menu.length,
       soldItems,
-      totalRevenue,
+      totalRevenue: reports?.totalPaid || 0,
       activeTables: tableSummaries.length,
       openOrders: orders.filter((order) => order.status !== "entregue").length,
+      closedTables: reports?.payments.length || 0,
     };
-  }, [menu.length, orders, tableSummaries.length]);
+  }, [menu.length, orders, reports, tableSummaries.length]);
 
   const selectedTableSummary = useMemo(() => {
     if (!selectedTableId) return null;
@@ -436,19 +457,24 @@ export default function AdminPage() {
     loadData();
   }
 
-  async function closeTableAccount(tableId: string) {
-    const activeOrders = orders.filter((order) => getOrderTableId(order) === tableId && order.status !== "entregue");
+  async function closeTableAccount() {
+    if (!closeTableId) return;
 
-    await Promise.all(
-      activeOrders.map((order) =>
-        fetch(`/api/orders/${order.id}/status`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "entregue" }),
-        }),
-      ),
-    );
+    const res = await fetch("/api/tables/close", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tableId: closeTableId, method: closePaymentMethod }),
+    });
 
+    if (!res.ok) {
+      setError("Nao foi possivel fechar a mesa. Verifique se ha pedidos ativos.");
+      return;
+    }
+
+    setCloseTableId(null);
+    setClosePaymentMethod("dinheiro");
+    setError("");
+    setFormNotice("Mesa fechada com pagamento registrado com sucesso.");
     loadData();
   }
 
@@ -566,6 +592,51 @@ export default function AdminPage() {
           >
             📋 Pedidos
           </button>
+          <button
+            onClick={() => setActiveSection("reports")}
+            className={`w-full text-left px-4 py-3 rounded-lg text-sm font-bold transition ${
+              activeSection === "reports"
+                ? "bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] text-white"
+                : "text-[#d3e4ff] hover:bg-[#13233f]"
+            }`}
+          >
+            📈 Relatorio
+          </button>
+
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={() => setShowKitchenAuthEditor((value) => !value)}
+              className="w-full rounded-lg border border-[#2e476f] bg-[#13233f] px-3 py-2 text-left text-xs font-bold uppercase tracking-[0.08em] text-[#9ec2ff]"
+            >
+              Login Cozinha {showKitchenAuthEditor ? "▲" : "▼"}
+            </button>
+
+            {showKitchenAuthEditor && (
+              <div className="mt-2 space-y-2 rounded-xl border border-[#2b4062] bg-[#101d33] p-3">
+                <input
+                  value={kitchenUser}
+                  onChange={(e) => setKitchenUser(e.target.value)}
+                  placeholder="Usuario do padeiro"
+                  className="w-full rounded-lg border border-[#2f466d] bg-[#091426] px-3 py-2 text-xs text-[#eef4ff]"
+                />
+                <input
+                  type="password"
+                  value={kitchenPass}
+                  onChange={(e) => setKitchenPass(e.target.value)}
+                  placeholder="Nova senha"
+                  className="w-full rounded-lg border border-[#2f466d] bg-[#091426] px-3 py-2 text-xs text-[#eef4ff]"
+                />
+                <button
+                  type="button"
+                  onClick={saveBakerCredentials}
+                  className="w-full rounded-lg border border-[#2f466d] bg-[#13233f] px-3 py-2 text-xs font-bold text-[#d6e3f8]"
+                >
+                  Salvar Login
+                </button>
+              </div>
+            )}
+          </div>
         </nav>
 
         {/* Links Externos */}
@@ -604,6 +675,7 @@ export default function AdminPage() {
               {activeSection === "menu" && "Cadastro de Produtos"}
               {activeSection === "tables" && "Mesas"}
               {activeSection === "orders" && "Pedidos"}
+              {activeSection === "reports" && "Relatorio da Padaria"}
             </h1>
           </header>
 
@@ -643,14 +715,27 @@ export default function AdminPage() {
             )}
 
             {activeSection === "menu" && (
-              <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
-                <form
-                  onSubmit={addMenu}
-                  className="h-fit rounded-2xl border border-[#234062] bg-[#0b1424] p-4 shadow-[0_10px_24px_rgba(0,0,0,0.35)]"
-                >
-                  <h2 className="text-2xl text-white">Novo Item</h2>
-                  <p className="mt-1 text-xs text-[#9bb0d0]">Copie e cole o produto com JSON no proprio formulario.</p>
-                  <div className="mt-4 space-y-2">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between rounded-2xl border border-[#234062] bg-[#0b1424] p-3">
+                  <p className="text-sm font-bold text-[#d9e7ff]">Cadastro minimalista</p>
+                  <button
+                    type="button"
+                    onClick={() => setShowProductForm((value) => !value)}
+                    className="rounded-lg border border-[#2f466d] bg-[#13233f] px-3 py-2 text-xs font-bold text-[#d6e3f8]"
+                  >
+                    {showProductForm ? "Fechar cadastro" : "Abrir cadastro"}
+                  </button>
+                </div>
+
+                <div className={`grid gap-4 ${showProductForm ? "xl:grid-cols-[360px_1fr]" : "xl:grid-cols-1"}`}>
+                  {showProductForm && (
+                    <form
+                      onSubmit={addMenu}
+                      className="h-fit rounded-2xl border border-[#234062] bg-[#0b1424] p-4 shadow-[0_10px_24px_rgba(0,0,0,0.35)]"
+                    >
+                      <h2 className="text-2xl text-white">Novo Item</h2>
+                      <p className="mt-1 text-xs text-[#9bb0d0]">Abra somente quando precisar, para manter a tela limpa.</p>
+                      <div className="mt-4 space-y-2">
                     <input
                       value={name}
                       onChange={(e) => setName(e.target.value)}
@@ -761,8 +846,7 @@ export default function AdminPage() {
                       </div>
                     ) : (
                       <button
-                        type="button"
-                        onClick={addMenu}
+                        type="submit"
                         className="w-full rounded-xl bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] px-4 py-3 font-bold text-white"
                       >
                         Cadastrar Item
@@ -770,33 +854,8 @@ export default function AdminPage() {
                     )}
                     {formNotice && <p className="text-xs font-semibold text-[#8fe0b8]">{formNotice}</p>}
                   </div>
-
-                  <div className="mt-4 rounded-xl border border-[#2b4062] bg-[#101d33] p-3">
-                    <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#8db5ff]">Login do Padeiro (Cozinha)</p>
-                    <div className="mt-2 space-y-2">
-                      <input
-                        value={kitchenUser}
-                        onChange={(e) => setKitchenUser(e.target.value)}
-                        placeholder="Usuario do padeiro"
-                        className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]"
-                      />
-                      <input
-                        type="password"
-                        value={kitchenPass}
-                        onChange={(e) => setKitchenPass(e.target.value)}
-                        placeholder="Nova senha do padeiro"
-                        className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]"
-                      />
-                      <button
-                        type="button"
-                        onClick={saveBakerCredentials}
-                        className="w-full rounded-xl border border-[#2f466d] bg-[#13233f] px-3 py-2 text-sm font-bold text-[#d6e3f8]"
-                      >
-                        Salvar Login da Cozinha
-                      </button>
-                    </div>
-                  </div>
-                </form>
+                    </form>
+                  )}
 
                 <section className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4 shadow-[0_10px_24px_rgba(0,0,0,0.35)]">
                   <h2 className="text-3xl text-white mb-4">Cardápio Atual</h2>
@@ -882,6 +941,7 @@ export default function AdminPage() {
                     ))}
                   </div>
                 </section>
+                </div>
               </div>
             )}
 
@@ -928,7 +988,10 @@ export default function AdminPage() {
 
                         {summary && summary.total > 0 && (
                           <button
-                            onClick={() => closeTableAccount(tableId)}
+                            onClick={() => {
+                              setCloseTableId(tableId);
+                              setClosePaymentMethod("dinheiro");
+                            }}
                             className="mt-2 w-full rounded-lg bg-[#c81f2f] px-2 py-2 text-xs font-bold text-white"
                           >
                             Fechar conta da mesa
@@ -988,9 +1051,101 @@ export default function AdminPage() {
                 </div>
               </section>
             )}
+
+            {activeSection === "reports" && (
+              <section className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  <article className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">Total pago</p>
+                    <p className="mt-2 text-3xl font-black text-[#ff8c98]">{currency(reports?.totalPaid || 0)}</p>
+                  </article>
+                  <article className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">Dinheiro</p>
+                    <p className="mt-2 text-2xl font-black text-white">{currency(reports?.totalsByMethod.dinheiro || 0)}</p>
+                  </article>
+                  <article className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">Pix</p>
+                    <p className="mt-2 text-2xl font-black text-white">{currency(reports?.totalsByMethod.pix || 0)}</p>
+                  </article>
+                  <article className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">Cartao</p>
+                    <p className="mt-2 text-2xl font-black text-white">{currency(reports?.totalsByMethod.cartao || 0)}</p>
+                  </article>
+                </div>
+
+                <div className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
+                  <h2 className="text-2xl text-white">Fechamentos recentes</h2>
+                  <div className="mt-4 overflow-x-auto">
+                    <table className="w-full min-w-[640px] border-collapse text-sm">
+                      <thead>
+                        <tr className="border-b border-[#2b4062] text-left text-[#8db5ff]">
+                          <th className="px-2 py-2">Mesa</th>
+                          <th className="px-2 py-2">Metodo</th>
+                          <th className="px-2 py-2">Valor</th>
+                          <th className="px-2 py-2">Data</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(reports?.payments || []).map((payment) => (
+                          <tr key={payment.id} className="border-b border-[#1c2f4a] text-[#d6e3f8]">
+                            <td className="px-2 py-2">{payment.tableId}</td>
+                            <td className="px-2 py-2 capitalize">{payment.method}</td>
+                            <td className="px-2 py-2 font-bold text-[#ff8c98]">{currency(payment.amount)}</td>
+                            <td className="px-2 py-2">{new Date(payment.closedAt).toLocaleString("pt-BR")}</td>
+                          </tr>
+                        ))}
+                        {(reports?.payments || []).length === 0 && (
+                          <tr>
+                            <td colSpan={4} className="px-2 py-4 text-[#93a8c6]">
+                              Nenhum fechamento registrado ainda.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </section>
+            )}
           </section>
         </div>
       </div>
+
+      {closeTableId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-[#365682] bg-[#0b1424] p-6 mx-4">
+            <h3 className="text-2xl font-bold text-white">Fechar mesa {closeTableId}</h3>
+            <p className="mt-2 text-sm text-[#b2c5e2]">Selecione a forma de pagamento para registrar no relatorio.</p>
+
+            <select
+              value={closePaymentMethod}
+              onChange={(e) => setClosePaymentMethod(e.target.value as PaymentMethod)}
+              className="mt-4 w-full rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]"
+            >
+              <option value="dinheiro">Dinheiro</option>
+              <option value="pix">Pix</option>
+              <option value="cartao">Cartao</option>
+            </select>
+
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setCloseTableId(null)}
+                className="flex-1 rounded-lg border border-[#365682] bg-[#13233f] px-4 py-3 font-bold text-[#d9e7ff]"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={closeTableAccount}
+                className="flex-1 rounded-lg bg-[#c81f2f] px-4 py-3 font-bold text-white"
+              >
+                Confirmar fechamento
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal de Confirmação de Exclusão */}
       {deleteModalOpen && (

@@ -3,11 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Order, OrderStatus } from "@/lib/types";
 
-const columns: OrderStatus[] = ["novo", "preparando", "pronto", "entregue"];
-
-function currency(value: number) {
-  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
-}
+const columns: OrderStatus[] = ["novo", "preparando", "pronto"];
 
 function statusTitle(status: OrderStatus) {
   const map: Record<OrderStatus, string> = {
@@ -17,6 +13,13 @@ function statusTitle(status: OrderStatus) {
     entregue: "Entregue",
   };
   return map[status];
+}
+
+function statusBadge(status: OrderStatus) {
+  if (status === "novo") return "bg-[#c81f2f]/20 text-[#ff9eaa]";
+  if (status === "preparando") return "bg-[#0f5bd4]/20 text-[#9bc5ff]";
+  if (status === "pronto") return "bg-[#1f8b4c]/20 text-[#8fe0b8]";
+  return "bg-[#2f466d] text-[#d6e3f8]";
 }
 
 export default function KitchenPage() {
@@ -55,11 +58,24 @@ export default function KitchenPage() {
     return () => clearInterval(timer);
   }, [authorized]);
 
-  const grouped = useMemo(() => {
-    return columns.map((status) => ({
-      status,
-      orders: orders.filter((order) => order.status === status),
-    }));
+  const tableGroups = useMemo(() => {
+    const activeOrders = orders.filter((order) => columns.includes(order.status));
+    const map: Record<string, Order[]> = {};
+
+    activeOrders.forEach((order) => {
+      const tableId = order.tableId?.trim() || "sem-mesa";
+      if (!map[tableId]) {
+        map[tableId] = [];
+      }
+      map[tableId].push(order);
+    });
+
+    return Object.entries(map)
+      .map(([tableId, tableOrders]) => ({
+        tableId,
+        orders: tableOrders.sort((a, b) => (a.createdAt > b.createdAt ? 1 : -1)),
+      }))
+      .sort((a, b) => a.tableId.localeCompare(b.tableId, "pt-BR", { numeric: true }));
   }, [orders]);
 
   async function login(e: FormEvent) {
@@ -158,46 +174,73 @@ export default function KitchenPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#060b14] px-4 py-8 text-[#eef4ff] md:px-8 md:py-10">
-      <header className="rounded-3xl border border-[#244063] bg-[#0b1424] p-6 shadow-[0_12px_30px_rgba(0,0,0,0.45)] md:flex md:items-center md:justify-between">
+    <main className="min-h-screen bg-[#060b14] px-4 py-6 text-[#eef4ff] md:px-8 md:py-8">
+      <header className="rounded-3xl border border-[#244063] bg-[#0b1424] p-5 shadow-[0_12px_30px_rgba(0,0,0,0.45)] md:flex md:items-center md:justify-between">
         <div>
-          <p className="text-sm font-bold uppercase tracking-[0.14em] text-[#8db5ff]">Painel da Cozinha</p>
-          <h1 className="mt-2 text-5xl leading-none text-white">Producao e Status</h1>
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#8db5ff]">Kitchen Display System</p>
+          <h1 className="mt-2 text-4xl font-black leading-none text-white md:text-5xl">Painel do Padeiro</h1>
+          <p className="mt-2 text-sm text-[#9bb0d0]">Divisao por mesa: cada mesa mostra pedidos e status para avancar.</p>
         </div>
         <div className="mt-4 flex items-center gap-2 md:mt-0">
-          <a href="/" className="text-sm font-bold text-[#d9e7ff]">Cardapio</a>
-          <button onClick={logout} className="rounded-lg border border-[#365682] bg-[#13233f] px-3 py-2 text-xs font-bold text-[#d9e7ff]">Sair</button>
+          <button
+            onClick={logout}
+            className="rounded-lg border border-[#365682] bg-[#13233f] px-3 py-2 text-xs font-bold text-[#d9e7ff]"
+          >
+            Sair
+          </button>
         </div>
       </header>
 
-      <section className="mt-6 grid gap-4 xl:grid-cols-4">
-        {grouped.map((group) => (
-          <div key={group.status} className="rounded-2xl border border-[#2a4162] bg-[#101d33] p-3">
-            <h2 className="text-2xl text-white">{statusTitle(group.status)}</h2>
-            <div className="mt-3 space-y-3">
-              {group.orders.length === 0 && <p className="text-xs text-[#93a8c6]">Sem pedidos.</p>}
+      <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {tableGroups.length === 0 && (
+          <article className="rounded-2xl border border-[#2a4162] bg-[#101d33] p-4 text-sm text-[#93a8c6]">
+            Nenhum pedido ativo no momento.
+          </article>
+        )}
+
+        {tableGroups.map((group) => (
+          <article key={group.tableId} className="rounded-2xl border border-[#2a4162] bg-[#101d33] p-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-3xl font-black text-white">Mesa {group.tableId}</h2>
+              <span className="rounded-full bg-[#244063] px-3 py-1 text-xs font-bold text-[#d6e3f8]">
+                {group.orders.length} pedido(s)
+              </span>
+            </div>
+
+            <div className="mt-4 space-y-3">
               {group.orders.map((order) => (
-                <article key={order.id} className="rounded-xl border border-[#2b4062] p-3">
-                  <p className="font-bold text-[#eef4ff]">{order.customerName}</p>
-                  <p className="text-xs text-[#93a8c6]">Mesa {order.tableId || "-"} • {new Date(order.createdAt).toLocaleTimeString("pt-BR")}</p>
-                  <ul className="mt-2 space-y-1 text-xs text-[#d6e3f8]">
+                <div key={order.id} className="rounded-xl border border-[#2b4062] bg-[#0b1424] p-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-[#93a8c6]">{new Date(order.createdAt).toLocaleTimeString("pt-BR")}</p>
+                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${statusBadge(order.status)}`}>
+                      {statusTitle(order.status)}
+                    </span>
+                  </div>
+
+                  <ul className="mt-2 space-y-1 text-sm text-[#d6e3f8]">
                     {order.items.map((item) => (
-                      <li key={`${order.id}-${item.itemId}`}>{item.quantity}x {item.name}</li>
+                      <li key={`${order.id}-${item.itemId}`}>
+                        {item.quantity}x {item.name}
+                      </li>
                     ))}
                   </ul>
-                  {order.notes && <p className="mt-2 text-xs italic text-[#93a8c6]">Obs: {order.notes}</p>}
-                  <p className="mt-2 text-sm font-bold text-[#ff8c98]">{currency(order.total)}</p>
+
+                  {order.notes && (
+                    <p className="mt-2 rounded-lg border border-[#2e476f] bg-[#13233f] px-2 py-2 text-xs italic text-[#b7cbe8]">
+                      Obs: {order.notes}
+                    </p>
+                  )}
+
                   <button
                     onClick={() => nextStatus(order)}
-                    disabled={order.status === "entregue"}
-                    className="mt-2 w-full rounded-lg bg-[#0f5bd4] px-2 py-2 text-xs font-bold text-white disabled:opacity-40"
+                    className="mt-3 w-full rounded-lg bg-[#0f5bd4] px-3 py-2 text-sm font-black text-white hover:brightness-105"
                   >
                     Avancar status
                   </button>
-                </article>
+                </div>
               ))}
             </div>
-          </div>
+          </article>
         ))}
       </section>
     </main>

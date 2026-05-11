@@ -1,4 +1,4 @@
-import { BakerUser, MenuItem, Order, OrderStatus } from "@/lib/types";
+import { BakerUser, MenuItem, Order, OrderStatus, PaymentMethod, PaymentRecord } from "@/lib/types";
 
 const now = new Date().toISOString();
 
@@ -72,6 +72,8 @@ let orders: Order[] = [
     createdAt: now,
   },
 ];
+
+let payments: PaymentRecord[] = [];
 
 export function listMenu() {
   return menu;
@@ -162,4 +164,40 @@ export function updateOrderStatus(id: string, status: OrderStatus) {
     return updated;
   });
   return updated;
+}
+
+export function closeTableWithPayment(tableId: string, method: PaymentMethod) {
+  const normalizedTableId = tableId.trim();
+  const activeOrders = orders.filter(
+    (order) => order.tableId.trim() === normalizedTableId && order.status !== "entregue",
+  );
+
+  const total = activeOrders.reduce((acc, order) => acc + order.total, 0);
+
+  if (activeOrders.length === 0 || total <= 0) {
+    return { closedOrders: 0, total: 0, payment: null as PaymentRecord | null };
+  }
+
+  const activeOrderIds = new Set(activeOrders.map((order) => order.id));
+
+  orders = orders.map((order) => {
+    if (!activeOrderIds.has(order.id)) return order;
+    return { ...order, status: "entregue" };
+  });
+
+  const payment: PaymentRecord = {
+    id: crypto.randomUUID(),
+    tableId: normalizedTableId,
+    amount: total,
+    method,
+    closedAt: new Date().toISOString(),
+  };
+
+  payments = [payment, ...payments];
+
+  return { closedOrders: activeOrders.length, total, payment };
+}
+
+export function listPayments() {
+  return payments.sort((a, b) => (a.closedAt < b.closedAt ? 1 : -1));
 }
