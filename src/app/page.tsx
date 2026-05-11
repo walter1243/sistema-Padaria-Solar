@@ -4,7 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { MenuCategory, MenuItem, Order, OrderItem } from "@/lib/types";
 
-type CartStep = "items" | "info" | "confirm";
+type CartStep = "items" | "confirm";
 
 type CartLine = {
   lineId: string;
@@ -36,7 +36,6 @@ function HomePageContent() {
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [cartLines, setCartLines] = useState<CartLine[]>([]);
   const [customerName, setCustomerName] = useState("");
-  const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [showDrawer, setShowDrawer] = useState(false);
@@ -266,11 +265,6 @@ function HomePageContent() {
 
   async function submitOrder() {
     setMessage("");
-    if (!customerName.trim()) {
-      setMessage("Digite seu nome ou identificacao da mesa.");
-      return;
-    }
-
     if (cartLines.length === 0) {
       setMessage("Adicione pelo menos um item no pedido.");
       return;
@@ -300,8 +294,8 @@ function HomePageContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tableId,
-          customerName,
-          notes,
+          customerName: customerName.trim() || (tableId ? `Mesa ${tableId}` : "Cliente"),
+          notes: "",
           items,
         }),
       });
@@ -313,7 +307,6 @@ function HomePageContent() {
 
       setMessage("Pedido enviado com sucesso! Seu pedido esta na cozinha.");
       setCartLines([]);
-      setNotes("");
       setShowCart(false);
       setCartStep("items");
       setTimeout(() => setMessage(""), 3000);
@@ -601,25 +594,12 @@ function HomePageContent() {
                   Itens
                 </button>
                 <button
-                  onClick={() => cartLines.length > 0 && setCartStep("info")}
+                  onClick={() => cartLines.length > 0 && setCartStep("confirm")}
                   disabled={cartLines.length === 0}
-                  className={`flex-1 rounded-lg py-2 text-xs font-bold transition ${
-                    cartStep === "info"
-                      ? "bg-[#c81f2f] text-white"
-                      : cartLines.length === 0
-                        ? "bg-[#0f182b] text-[#5c6f91]"
-                        : "bg-[#13233f] text-[#8db5ff]"
-                  }`}
-                >
-                  Info
-                </button>
-                <button
-                  onClick={() => customerName.trim() && setCartStep("confirm")}
-                  disabled={!customerName.trim()}
                   className={`flex-1 rounded-lg py-2 text-xs font-bold transition ${
                     cartStep === "confirm"
                       ? "bg-[#c81f2f] text-white"
-                      : !customerName.trim()
+                      : cartLines.length === 0
                         ? "bg-[#0f182b] text-[#5c6f91]"
                         : "bg-[#13233f] text-[#8db5ff]"
                   }`}
@@ -709,31 +689,6 @@ function HomePageContent() {
                   </div>
                 )}
 
-                {cartStep === "info" && (
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-xs font-bold text-[#9bb0d0]">Seu nome ou mesa *</label>
-                      <input
-                        value={customerName}
-                        onChange={(e) => setCustomerName(e.target.value)}
-                        placeholder="Ex: Mesa 3"
-                        readOnly={Boolean(tableId)}
-                        className="mt-1 w-full rounded-lg border border-[#2e476f] bg-[#091426] px-3 py-2 text-sm text-[#eef4ff] outline-none focus:border-[#0f5bd4]"
-                      />
-                      {tableId && <p className="mt-1 text-[11px] text-[#8db5ff]">Mesa vinculada por QR: {tableId}</p>}
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-[#9bb0d0]">Observacoes (opcional)</label>
-                      <textarea
-                        value={notes}
-                        onChange={(e) => setNotes(e.target.value)}
-                        placeholder="Ex: Sem sal, extra crocante..."
-                        className="mt-1 h-20 w-full resize-none rounded-lg border border-[#2e476f] bg-[#091426] px-3 py-2 text-sm text-[#eef4ff] outline-none focus:border-[#0f5bd4]"
-                      />
-                    </div>
-                  </div>
-                )}
-
                 {cartStep === "confirm" && (
                   <div className="space-y-3">
                     <div className="rounded-lg bg-[#13233f] p-3">
@@ -757,13 +712,6 @@ function HomePageContent() {
                       </ul>
                     </div>
 
-                    {notes && (
-                      <div className="rounded-lg bg-[#13233f] p-3">
-                        <p className="text-xs font-bold text-[#9bb0d0]">Obs</p>
-                        <p className="mt-1 text-sm text-[#eef4ff]">{notes}</p>
-                      </div>
-                    )}
-
                     <div className="rounded-lg border-t-2 border-[#c81f2f] bg-[#091426] p-3">
                       <div className="flex justify-between">
                         <span className="font-bold text-[#eef4ff]">Total a Pagar</span>
@@ -783,33 +731,17 @@ function HomePageContent() {
               <div className="border-t border-[#1f314f] p-4">
                 {cartStep === "items" && (
                   <button
-                    onClick={() => cartLines.length > 0 && setCartStep("info")}
+                    onClick={() => cartLines.length > 0 && setCartStep("confirm")}
                     disabled={cartLines.length === 0}
                     className="w-full rounded-lg bg-[#c81f2f] px-4 py-3 font-bold text-white transition hover:brightness-95 disabled:opacity-50"
                   >
                     Continuar
                   </button>
                 )}
-                {cartStep === "info" && (
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setCartStep("items")}
-                      className="flex-1 rounded-lg border border-[#2f466d] px-4 py-3 font-bold text-[#8db5ff] transition hover:bg-[#13233f]"
-                    >
-                      Voltar
-                    </button>
-                    <button
-                      onClick={() => setCartStep("confirm")}
-                      className="flex-1 rounded-lg bg-[#0f5bd4] px-4 py-3 font-bold text-white transition hover:brightness-95"
-                    >
-                      Revisar
-                    </button>
-                  </div>
-                )}
                 {cartStep === "confirm" && (
                   <div className="flex gap-2">
                     <button
-                      onClick={() => setCartStep("info")}
+                      onClick={() => setCartStep("items")}
                       className="flex-1 rounded-lg border border-[#2f466d] px-4 py-3 font-bold text-[#8db5ff] transition hover:bg-[#13233f]"
                     >
                       Voltar
@@ -819,7 +751,7 @@ function HomePageContent() {
                       disabled={loading}
                       className="flex-1 rounded-lg bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] px-4 py-3 font-bold text-white transition hover:brightness-95 disabled:opacity-50"
                     >
-                      {loading ? "Enviando..." : "Confirmar Pedido"}
+                      {loading ? "Enviando..." : "Enviar para cozinha"}
                     </button>
                   </div>
                 )}
