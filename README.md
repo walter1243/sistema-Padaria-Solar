@@ -30,14 +30,14 @@ Acesse `http://localhost:3000`.
 Crie um arquivo `.env.local` baseado em `.env.example`:
 
 ```env
-NEXT_PUBLIC_ADMIN_PIN=1234
+NEXT_PUBLIC_ADMIN_PASSWORD=123456
 ```
 
 ## Deploy na Vercel
 
 1. Suba o projeto para um repositorio GitHub.
 2. Importe o repositorio na Vercel.
-3. Configure a variavel de ambiente `NEXT_PUBLIC_ADMIN_PIN`.
+3. Configure a variavel de ambiente `NEXT_PUBLIC_ADMIN_PASSWORD`.
 4. Deploy.
 
 ## Observacao importante
