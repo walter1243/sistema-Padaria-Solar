@@ -15,8 +15,8 @@ const body = Manrope({
 });
 
 export const metadata: Metadata = {
-  title: "Padaria Prime - Cardapio e Pedidos",
-  description: "Sistema de cardapio e pedidos para lanchonete/padaria.",
+  title: "Padaria Solar - Cardapio e Pedidos",
+  description: "Sistema de cardapio e pedidos para padaria.",
 };
 
 export default function RootLayout({

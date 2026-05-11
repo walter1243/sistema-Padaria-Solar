@@ -1,6 +1,6 @@
-# Padaria Prime Web App
+# Padaria Solar - Sistema de Cardápio e Pedidos
 
-Aplicacao web para lanchonete/padaria com dois perfis:
+Aplicacao web profissional para padaria com dois perfis:
 
 - Cliente: visualiza cardapio e envia pedido
 - Admin: gerencia cardapio e acompanha pedidos

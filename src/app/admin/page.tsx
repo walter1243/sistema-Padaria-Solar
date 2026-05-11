@@ -158,7 +158,7 @@ export default function AdminPage() {
       <header className="rounded-3xl border border-cafe/15 bg-paper/90 p-6 shadow-card md:flex md:items-end md:justify-between">
         <div>
           <p className="text-sm font-bold uppercase tracking-[0.14em] text-oliva">Area Administrativa</p>
-          <h1 className="mt-2 text-6xl leading-none">Controle da Lanchonete</h1>
+          <h1 className="mt-2 text-6xl leading-none">Controle da Padaria Solar</h1>
         </div>
         <a href="/" className="mt-4 inline-block text-sm font-bold text-cafe/70 md:mt-0">
           Voltar para cardapio
