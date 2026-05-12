@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { categories, products } from "@/lib/db/schema";
-import { eq, ilike, asc } from "drizzle-orm";
+import { eq, asc, sql } from "drizzle-orm";
 
 function isAdminCookieValid(cookieValue: string | undefined) {
   const expected = process.env.ADMIN_SESSION_TOKEN || "padaria_admin_token_dev";
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
   const [existing] = await db
     .select()
     .from(categories)
-    .where(ilike(categories.name, name))
+    .where(sql`lower(${categories.name}) = lower(${name})`)
     .limit(1);
 
   if (existing) {
@@ -54,10 +54,14 @@ export async function DELETE(request: Request) {
   const body = await request.json();
   const name = String(body.name ?? "").trim();
 
+  if (!name) {
+    return NextResponse.json({ error: "Nome da categoria invalido." }, { status: 400 });
+  }
+
   const [cat] = await db
     .select()
     .from(categories)
-    .where(ilike(categories.name, name))
+    .where(sql`lower(${categories.name}) = lower(${name})`)
     .limit(1);
 
   if (!cat) {
@@ -77,6 +81,49 @@ export async function DELETE(request: Request) {
     );
   }
 
-  await db.delete(categories).where(eq(categories.id, cat.id));
-  return NextResponse.json({ success: true });
+  const deleted = await db.delete(categories).where(eq(categories.id, cat.id)).returning({ id: categories.id, name: categories.name });
+  if (deleted.length === 0) {
+    return NextResponse.json({ error: "Categoria nao foi removida do banco. Tente novamente." }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true, category: deleted[0].name });
+}
+
+export async function PUT(request: Request) {
+  const cookieStore = await cookies();
+  const adminCookie = cookieStore.get("padaria_admin_session")?.value;
+
+  if (!isAdminCookieValid(adminCookie)) {
+    return NextResponse.json({ error: "Nao autorizado." }, { status: 401 });
+  }
+
+  const body = await request.json();
+  const previousName = String(body.previousName ?? "").trim();
+  const nextName = String(body.nextName ?? "").trim();
+
+  if (!previousName || !nextName) {
+    return NextResponse.json({ error: "Nome atual e novo nome sao obrigatorios." }, { status: 400 });
+  }
+
+  const [cat] = await db
+    .select()
+    .from(categories)
+    .where(sql`lower(${categories.name}) = lower(${previousName})`)
+    .limit(1);
+
+  if (!cat) {
+    return NextResponse.json({ error: "Categoria nao encontrada no banco de dados." }, { status: 404 });
+  }
+
+  const [updated] = await db
+    .update(categories)
+    .set({ name: nextName })
+    .where(eq(categories.id, cat.id))
+    .returning({ id: categories.id, name: categories.name });
+
+  if (!updated) {
+    return NextResponse.json({ error: "Nao foi possivel atualizar a categoria." }, { status: 500 });
+  }
+
+  return NextResponse.json({ category: updated.name });
 }

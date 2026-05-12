@@ -102,6 +102,9 @@ export default function AdminPage() {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteItemId, setDeleteItemId] = useState<string | null>(null);
   const [deletePassword, setDeletePassword] = useState("");
+  const [deleteCategoryModalOpen, setDeleteCategoryModalOpen] = useState(false);
+  const [deleteCategoryName, setDeleteCategoryName] = useState("");
+  const [deleteCategoryPassword, setDeleteCategoryPassword] = useState("");
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [closeTableId, setCloseTableId] = useState<string | null>(null);
   const [closePaymentMethod, setClosePaymentMethod] = useState<PaymentMethod>("dinheiro");
@@ -428,6 +431,18 @@ export default function AdminPage() {
   }
 
   async function removeMenuCategory(categoryName: string) {
+    setDeleteCategoryName(categoryName);
+    setDeleteCategoryPassword("");
+    setDeleteCategoryModalOpen(true);
+  }
+
+  async function confirmDeleteMenuCategory() {
+    if (deleteCategoryPassword !== "1234") {
+      setError("Senha incorreta. Use 1234 para confirmar a exclusao da categoria.");
+      return;
+    }
+
+    const categoryName = deleteCategoryName.trim();
     const res = await fetch("/api/categories", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
@@ -442,6 +457,9 @@ export default function AdminPage() {
 
     setError("");
     setFormNotice(`Categoria ${categoryName} removida com sucesso.`);
+    setDeleteCategoryModalOpen(false);
+    setDeleteCategoryName("");
+    setDeleteCategoryPassword("");
     await loadData();
 
     if (category === categoryName) {
@@ -1472,6 +1490,52 @@ export default function AdminPage() {
                     confirmDelete(deleteItemId);
                   }
                 }}
+                className="flex-1 rounded-lg bg-[#c81f2f] px-4 py-3 font-bold text-white hover:bg-[#b01625] transition"
+              >
+                Excluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteCategoryModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="rounded-2xl border border-[#c81f2f] bg-[#0b1424] p-6 max-w-sm w-full mx-4">
+            <h3 className="text-2xl font-bold text-white mb-2">🗑️ Remover categoria</h3>
+            <p className="text-sm text-[#b2c5e2] mb-4">
+              Categoria: <strong>{deleteCategoryName}</strong>. Digite a senha 1234 para confirmar.
+            </p>
+
+            <input
+              type="password"
+              value={deleteCategoryPassword}
+              onChange={(e) => setDeleteCategoryPassword(e.target.value)}
+              placeholder="Digite 1234..."
+              className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-4 py-3 text-[#eef4ff] mb-4"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  confirmDeleteMenuCategory();
+                }
+              }}
+            />
+
+            {error && <p className="mb-3 text-xs font-semibold text-[#ff8c98]">{error}</p>}
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  setDeleteCategoryModalOpen(false);
+                  setDeleteCategoryName("");
+                  setDeleteCategoryPassword("");
+                  setError("");
+                }}
+                className="flex-1 rounded-lg border border-[#365682] bg-[#13233f] px-4 py-3 font-bold text-[#d9e7ff] hover:bg-[#1a2f50] transition"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmDeleteMenuCategory}
                 className="flex-1 rounded-lg bg-[#c81f2f] px-4 py-3 font-bold text-white hover:bg-[#b01625] transition"
               >
                 Excluir
