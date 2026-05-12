@@ -259,6 +259,7 @@ export default function AdminPage() {
   const [receiptModal, setReceiptModal] = useState<TableReceipt | null>(null);
   const [lastPrintedReceipt, setLastPrintedReceipt] = useState<TableReceipt | null>(null);
   const [isDesktopPrintEnabled, setIsDesktopPrintEnabled] = useState(false);
+  const [isPrinting, setIsPrinting] = useState(false);
 
   async function loadData() {
     const [menuRes, ordersRes, categoriesRes, bakerRes, adminRes, reportsRes, tablesRes] = await Promise.all([
@@ -408,26 +409,58 @@ export default function AdminPage() {
   }
 
   async function printWithThermalBridge(receipt: TableReceipt) {
-    const response = await fetch(`${THERMAL_BRIDGE_URL}/print-receipt`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(receipt),
-    });
+    console.log("[PRINT] Iniciando impressão para", THERMAL_BRIDGE_URL, receipt);
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      
+      const response = await fetch(`${THERMAL_BRIDGE_URL}/print-receipt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(receipt),
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      console.log("[PRINT] Resposta recebida:", response.status, response.ok);
 
-    if (!response.ok) {
-      const payload = (await response.json().catch(() => ({}))) as { error?: string };
-      throw new Error(payload.error || "Falha ao imprimir na termica.");
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(payload.error || "Falha ao imprimir na termica.");
+      }
+    } catch (e) {
+      if ((e as Error).name === "AbortError") {
+        throw new Error("Timeout: serviço local demorou muito ou não respondeu. Verifique: 1) npm run printer:service está rodando? 2) Firewall permite 127.0.0.1:8765?");
+      }
+      throw e;
     }
   }
 
   async function reprintWithThermalBridge() {
-    const response = await fetch(`${THERMAL_BRIDGE_URL}/reprint-last`, {
-      method: "POST",
-    });
+    console.log("[REPRINT] Iniciando reimpressão para", THERMAL_BRIDGE_URL);
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      
+      const response = await fetch(`${THERMAL_BRIDGE_URL}/reprint-last`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      console.log("[REPRINT] Resposta recebida:", response.status, response.ok);
 
-    if (!response.ok) {
-      const payload = (await response.json().catch(() => ({}))) as { error?: string };
-      throw new Error(payload.error || "Falha ao reimprimir na termica.");
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(payload.error || "Falha ao reimprimir na termica.");
+      }
+    } catch (e) {
+      if ((e as Error).name === "AbortError") {
+        throw new Error("Timeout: serviço local não respondeu. Verifique se npm run printer:service está rodando.");
+      }
+      throw e;
     }
   }
 
@@ -437,35 +470,57 @@ export default function AdminPage() {
       window.localStorage.setItem(LAST_RECEIPT_STORAGE_KEY, JSON.stringify(receipt));
     }
 
-    if (!isDesktopPrintEnabled) return;
+    if (!isDesktopPrintEnabled) {
+      setError("Impressão desabilitada neste dispositivo (apenas desktop/tablet com impressora).");
+      return;
+    }
+
+    setIsPrinting(true);
+    setError("");
+    setFormNotice("Enviando cupom para impressora...");
 
     try {
+      console.log("[HANDLE] Iniciando impressão...");
       await printWithThermalBridge(receipt);
-      setFormNotice("Cupom enviado para impressora termica.");
+      setFormNotice("✓ Cupom enviado para impressora termica!");
+      setTimeout(() => setIsPrinting(false), 2000);
       return;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Falha ao imprimir na termica.";
-      setError(`${message} Nao foi enviada impressao comum para evitar cupom sem corte.`);
-      setFormNotice("Impressao termica falhou. Verifique a conexao da Elgin i9 e o servico local.");
+      console.error("[HANDLE] Erro ao imprimir:", error);
+      setError(`ERRO: ${message}\n\nVerifique:\n1. npm run printer:service está rodando?\n2. Impressora ELGIN i9(USB) conectada?\n3. Firewall permite conexão 127.0.0.1:8765?`);
+      setFormNotice("✗ Impressão falhou - veja erros acima");
+      setIsPrinting(false);
     }
   }
 
   async function handleReprintLastReceipt() {
-    if (!isDesktopPrintEnabled) return;
+    if (!isDesktopPrintEnabled) {
+      setError("Reimpressão desabilitada neste dispositivo (apenas desktop/tablet com impressora).");
+      return;
+    }
 
     if (!lastPrintedReceipt) {
       setError("Ainda nao existe cupom anterior impresso para reimprimir.");
       return;
     }
 
+    setIsPrinting(true);
+    setError("");
+    setFormNotice("Enviando reimpressão para impressora...");
+
     try {
+      console.log("[HANDLE] Iniciando reimpressão...");
       await reprintWithThermalBridge();
-      setFormNotice("Reimpressao enviada para impressora termica.");
+      setFormNotice("✓ Reimpressão enviada para impressora!");
+      setTimeout(() => setIsPrinting(false), 2000);
       return;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Falha ao reimprimir na termica.";
-      setError(`${message} Reimpressao comum bloqueada para manter corte na termica.`);
-      setFormNotice("Reimpressao termica falhou. Confira a Elgin i9 e o bridge local.");
+      console.error("[HANDLE] Erro ao reimprimir:", error);
+      setError(`ERRO: ${message}\n\nVerifique:\n1. npm run printer:service está rodando?\n2. Impressora ELGIN i9(USB) conectada?`);
+      setFormNotice("✗ Reimpressão falhou - veja erros acima");
+      setIsPrinting(false);
     }
   }
 
@@ -1793,23 +1848,28 @@ export default function AdminPage() {
                   <button
                     type="button"
                     onClick={() => void handlePrintReceipt(receiptModal)}
-                    className="rounded-lg bg-[#0f5bd4] px-4 py-3 font-bold text-white"
+                    disabled={isPrinting}
+                    className="rounded-lg bg-[#0f5bd4] px-4 py-3 font-bold text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                   >
-                    Imprimir cupom
+                    {isPrinting && <span className="inline-block animate-spin">⏳</span>}
+                    {isPrinting ? "Imprimindo..." : "Imprimir cupom"}
                   </button>
                   <button
                     type="button"
                     onClick={() => void handleReprintLastReceipt()}
-                    className="rounded-lg border border-[#365682] bg-[#13233f] px-4 py-3 font-bold text-[#d9e7ff]"
+                    disabled={isPrinting}
+                    className="rounded-lg border border-[#365682] bg-[#13233f] px-4 py-3 font-bold text-[#d9e7ff] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                   >
-                    Reimprimir ultimo (Ctrl+P)
+                    {isPrinting && <span className="inline-block animate-spin">⏳</span>}
+                    {isPrinting ? "Reimprimindo..." : "Reimprimir ultimo (Ctrl+P)"}
                   </button>
                 </>
               )}
               <button
                 type="button"
                 onClick={() => setReceiptModal(null)}
-                className="rounded-lg border border-[#365682] bg-[#13233f] px-4 py-3 font-bold text-[#d9e7ff]"
+                disabled={isPrinting}
+                className="rounded-lg border border-[#365682] bg-[#13233f] px-4 py-3 font-bold text-[#d9e7ff] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Fechar
               </button>
