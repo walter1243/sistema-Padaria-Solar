@@ -36,6 +36,8 @@ def _respond(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, An
     handler.send_header("Access-Control-Allow-Origin", "*")
     handler.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
     handler.send_header("Access-Control-Allow-Headers", "Content-Type")
+    # Required by modern browsers when an HTTPS site calls localhost/private network.
+    handler.send_header("Access-Control-Allow-Private-Network", "true")
     handler.end_headers()
     handler.wfile.write(body)
 

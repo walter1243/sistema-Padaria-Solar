@@ -338,17 +338,20 @@ export default function AdminPage() {
   function printReceipt(receipt: TableReceipt) {
     if (typeof window === "undefined") return;
 
-    const printWindow = window.open("", "_blank", "noopener,noreferrer,width=420,height=720");
+    const printWindow = window.open("", "_blank", "width=420,height=720");
     if (!printWindow) {
       setError("Nao foi possivel abrir a janela de impressao. Verifique o bloqueio de pop-up.");
       return;
     }
 
+    const html = buildReceiptHtml(receipt);
     printWindow.document.open();
-    printWindow.document.write(buildReceiptHtml(receipt));
+    printWindow.document.write(html);
     printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
+    printWindow.onload = () => {
+      printWindow.focus();
+      printWindow.print();
+    };
   }
 
   async function printWithThermalBridge(receipt: TableReceipt) {
@@ -387,8 +390,10 @@ export default function AdminPage() {
       await printWithThermalBridge(receipt);
       setFormNotice("Cupom enviado para impressora termica.");
       return;
-    } catch {
+    } catch (error) {
       // Fallback: browser print.
+      const message = error instanceof Error ? error.message : "Falha ao imprimir na termica.";
+      setError(`${message} Usando impressao do navegador como alternativa.`);
       printReceipt(receipt);
       setFormNotice("Impressao via navegador (servico termico indisponivel).");
     }
@@ -406,8 +411,10 @@ export default function AdminPage() {
       await reprintWithThermalBridge();
       setFormNotice("Reimpressao enviada para impressora termica.");
       return;
-    } catch {
+    } catch (error) {
       // Fallback: use in-browser copy.
+      const message = error instanceof Error ? error.message : "Falha ao reimprimir na termica.";
+      setError(`${message} Usando reimpressao do navegador como alternativa.`);
       printReceipt(lastPrintedReceipt);
       setFormNotice("Reimpressao via navegador (servico termico indisponivel).");
     }
