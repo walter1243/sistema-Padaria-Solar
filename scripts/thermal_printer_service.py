@@ -152,8 +152,11 @@ def _connect_printer() -> Any:
 
 
 def _print_receipt(receipt: dict[str, Any]) -> None:
+    print("[_print_receipt] Iniciando impressão...")
     printer = _connect_printer()
+    print("[_print_receipt] Impressora conectada, enviando ESC @...")
     printer._raw(b"\x1b\x40")
+    print("[_print_receipt] Configurando impressora...")
     printer.set(
         align="left",
         font="a",
@@ -217,7 +220,11 @@ def _print_receipt(receipt: dict[str, Any]) -> None:
 
     # Pequena alimentação para o corte sair logo abaixo da data, sem papel sobrando.
     printer.text("\n")
+    print("[_print_receipt] Executando cut()...")
     printer.cut()
+    print("[_print_receipt] Fechando conexão...")
+    printer.close()
+    print("[_print_receipt] ✓ Impressão concluída com sucesso!")
 
 
 class PrinterHandler(BaseHTTPRequestHandler):
