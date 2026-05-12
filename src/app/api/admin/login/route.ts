@@ -1,21 +1,14 @@
 import { NextResponse } from "next/server";
+import { getAdminCredentials } from "@/lib/db/admin";
 
 const COOKIE_NAME = "padaria_admin_session";
-
-function getCredentials() {
-  return {
-    username: process.env.ADMIN_USERNAME || "admin",
-    password: process.env.ADMIN_PASSWORD || "123456",
-    sessionToken: process.env.ADMIN_SESSION_TOKEN || "padaria_admin_token_dev",
-  };
-}
 
 export async function POST(request: Request) {
   const body = await request.json();
   const username = String(body.username ?? "").trim();
   const password = String(body.password ?? "").trim();
 
-  const creds = getCredentials();
+  const creds = await getAdminCredentials();
   const isValid = username.toLowerCase() === creds.username.toLowerCase() && password === creds.password;
 
   if (!isValid) {

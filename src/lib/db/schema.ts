@@ -17,6 +17,13 @@ export const categories = pgTable("categories", {
   name: varchar("name", { length: 100 }).notNull().unique(),
 });
 
+export const adminAccounts = pgTable("admin_accounts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  username: varchar("username", { length: 100 }).notNull().unique(),
+  password: varchar("password", { length: 255 }).notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // ─── Products (cardápio) ─────────────────────────────────────────────────────
 export const products = pgTable("products", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -96,6 +103,8 @@ export const payments = pgTable("payments", {
 export const categoriesRelations = relations(categories, ({ many }) => ({
   products: many(products),
 }));
+
+export const adminAccountsRelations = relations(adminAccounts, () => ({}));
 
 export const productsRelations = relations(products, ({ one, many }) => ({
   category: one(categories, {

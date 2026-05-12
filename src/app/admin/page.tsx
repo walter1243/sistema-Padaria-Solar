@@ -5,7 +5,7 @@ import { MenuCategory, MenuItem, Order, OrderStatus, PaymentMethod, PaymentRecor
 
 const statusFlow: OrderStatus[] = ["novo", "preparando", "pronto", "entregue"];
 
-type AdminSection = "dashboard" | "menu" | "tables" | "orders" | "reports";
+type AdminSection = "dashboard" | "menu" | "tables" | "orders" | "reports" | "profile";
 
 type ReportsSummary = {
   totalPaid: number;
@@ -84,6 +84,10 @@ export default function AdminPage() {
   const [categories, setCategories] = useState<string[]>([]);
   const [kitchenUser, setKitchenUser] = useState("");
   const [kitchenPass, setKitchenPass] = useState("");
+  const [adminUser, setAdminUser] = useState("");
+  const [adminCurrentPassword, setAdminCurrentPassword] = useState("");
+  const [adminNewPassword, setAdminNewPassword] = useState("");
+  const [adminConfirmPassword, setAdminConfirmPassword] = useState("");
   const [reports, setReports] = useState<ReportsSummary | null>(null);
   const [tableSummaries, setTableSummaries] = useState<TableSummary[]>([]);
   const [showProductForm, setShowProductForm] = useState(false);
@@ -102,11 +106,12 @@ export default function AdminPage() {
   const [closePaymentMethod, setClosePaymentMethod] = useState<PaymentMethod>("dinheiro");
 
   async function loadData() {
-    const [menuRes, ordersRes, categoriesRes, bakerRes, reportsRes, tablesRes] = await Promise.all([
+    const [menuRes, ordersRes, categoriesRes, bakerRes, adminRes, reportsRes, tablesRes] = await Promise.all([
       fetch("/api/menu", { cache: "no-store" }),
       fetch("/api/orders", { cache: "no-store" }),
       fetch("/api/categories", { cache: "no-store" }),
       fetch("/api/baker/credentials", { cache: "no-store" }),
+      fetch("/api/admin/profile", { cache: "no-store" }),
       fetch("/api/reports/summary", { cache: "no-store" }),
       fetch("/api/tables/active", { cache: "no-store" }),
     ]);
@@ -124,6 +129,11 @@ export default function AdminPage() {
     if (bakerRes.ok) {
       const bakerData = (await bakerRes.json()) as { username: string };
       setKitchenUser(bakerData.username || "");
+    }
+
+    if (adminRes.ok) {
+      const adminData = (await adminRes.json()) as { username: string };
+      setAdminUser(adminData.username || "");
     }
 
     if (reportsRes.ok) {
@@ -351,6 +361,43 @@ export default function AdminPage() {
     setKitchenPass("");
     setError("");
     setFormNotice("Login do padeiro atualizado com sucesso.");
+  }
+
+  async function saveAdminProfile() {
+    const username = adminUser.trim();
+    const currentPassword = adminCurrentPassword.trim();
+    const newPassword = adminNewPassword.trim();
+    const confirmPassword = adminConfirmPassword.trim();
+
+    if (!username || !currentPassword || !newPassword || !confirmPassword) {
+      setError("Preencha usuario, senha atual, nova senha e confirmacao para salvar o perfil.");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setError("A confirmacao da nova senha nao confere.");
+      return;
+    }
+
+    const res = await fetch("/api/admin/profile", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, currentPassword, newPassword }),
+    });
+
+    if (!res.ok) {
+      const payload = (await res.json().catch(() => ({}))) as { error?: string };
+      setError(payload.error || "Nao foi possivel atualizar o perfil do admin.");
+      return;
+    }
+
+    const data = (await res.json()) as { username: string };
+    setAdminUser(data.username || username);
+    setAdminCurrentPassword("");
+    setAdminNewPassword("");
+    setAdminConfirmPassword("");
+    setError("");
+    setFormNotice("Perfil do admin atualizado com sucesso.");
   }
 
   async function toggleAvailability(item: MenuItem) {
@@ -586,6 +633,16 @@ export default function AdminPage() {
           >
             📈 Relatorio
           </button>
+          <button
+            onClick={() => openSection("profile")}
+            className={`w-full text-left px-4 py-3 rounded-lg text-sm font-bold transition ${
+              activeSection === "profile"
+                ? "bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] text-white"
+                : "text-[#d3e4ff] hover:bg-[#13233f]"
+            }`}
+          >
+            👤 Perfil
+          </button>
 
           <div className="pt-2">
             <button
@@ -675,6 +732,7 @@ export default function AdminPage() {
               {activeSection === "tables" && "Mesas"}
               {activeSection === "orders" && "Pedidos"}
               {activeSection === "reports" && "Relatorio da Padaria"}
+              {activeSection === "profile" && "Perfil do Administrador"}
             </h1>
           </header>
 
@@ -1177,6 +1235,64 @@ export default function AdminPage() {
                         )}
                       </tbody>
                     </table>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {activeSection === "profile" && (
+              <section className="grid gap-4 xl:grid-cols-[minmax(0,520px)_1fr]">
+                <div className="rounded-2xl border border-[#234062] bg-[#0b1424] p-5 shadow-[0_10px_24px_rgba(0,0,0,0.35)]">
+                  <h2 className="text-2xl text-white">Perfil do admin</h2>
+                  <p className="mt-2 text-sm text-[#b2c5e2]">
+                    Atualize o usuario e a senha do painel administrativo sem depender do arquivo de ambiente.
+                  </p>
+
+                  <div className="mt-5 space-y-3">
+                    <input
+                      value={adminUser}
+                      onChange={(e) => setAdminUser(e.target.value)}
+                      placeholder="Usuario do admin"
+                      className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-4 py-3 text-[#eef4ff]"
+                    />
+                    <input
+                      type="password"
+                      value={adminCurrentPassword}
+                      onChange={(e) => setAdminCurrentPassword(e.target.value)}
+                      placeholder="Senha atual"
+                      className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-4 py-3 text-[#eef4ff]"
+                    />
+                    <input
+                      type="password"
+                      value={adminNewPassword}
+                      onChange={(e) => setAdminNewPassword(e.target.value)}
+                      placeholder="Nova senha"
+                      className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-4 py-3 text-[#eef4ff]"
+                    />
+                    <input
+                      type="password"
+                      value={adminConfirmPassword}
+                      onChange={(e) => setAdminConfirmPassword(e.target.value)}
+                      placeholder="Confirmar nova senha"
+                      className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-4 py-3 text-[#eef4ff]"
+                    />
+
+                    <button
+                      type="button"
+                      onClick={saveAdminProfile}
+                      className="w-full rounded-xl bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] px-4 py-3 font-bold text-white"
+                    >
+                      Salvar perfil
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-[#234062] bg-[#0b1424] p-5 shadow-[0_10px_24px_rgba(0,0,0,0.35)]">
+                  <h2 className="text-2xl text-white">Regras</h2>
+                  <div className="mt-4 space-y-3 text-sm text-[#b2c5e2]">
+                    <p>A senha atual e obrigatoria para confirmar a troca.</p>
+                    <p>A nova senha passa a valer no proximo login do painel administrativo.</p>
+                    <p>O cookie da sessao atual continua valido ate voce sair do painel.</p>
                   </div>
                 </div>
               </section>
