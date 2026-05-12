@@ -1,6 +1,8 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { addCategory, deleteCategory, listCategories } from "@/lib/store";
+import { db } from "@/lib/db";
+import { categories, products } from "@/lib/db/schema";
+import { eq, ilike, asc } from "drizzle-orm";
 
 function isAdminCookieValid(cookieValue: string | undefined) {
   const expected = process.env.ADMIN_SESSION_TOKEN || "padaria_admin_token_dev";
@@ -8,7 +10,8 @@ function isAdminCookieValid(cookieValue: string | undefined) {
 }
 
 export async function GET() {
-  return NextResponse.json(listCategories());
+  const rows = await db.select({ name: categories.name }).from(categories).orderBy(asc(categories.name));
+  return NextResponse.json(rows.map((r) => r.name));
 }
 
 export async function POST(request: Request) {
@@ -20,13 +23,24 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
-  const category = addCategory(String(body.name ?? ""));
+  const name = String(body.name ?? "").trim();
 
-  if (!category) {
-    return NextResponse.json({ error: "Categoria invalida." }, { status: 400 });
+  if (!name) {
+    return NextResponse.json({ error: "Nome da categoria invalido." }, { status: 400 });
   }
 
-  return NextResponse.json({ category }, { status: 201 });
+  const [existing] = await db
+    .select()
+    .from(categories)
+    .where(ilike(categories.name, name))
+    .limit(1);
+
+  if (existing) {
+    return NextResponse.json({ category: existing.name }, { status: 200 });
+  }
+
+  const [created] = await db.insert(categories).values({ name }).returning();
+  return NextResponse.json({ category: created.name }, { status: 201 });
 }
 
 export async function DELETE(request: Request) {
@@ -38,15 +52,31 @@ export async function DELETE(request: Request) {
   }
 
   const body = await request.json();
-  const result = deleteCategory(String(body.name ?? ""));
+  const name = String(body.name ?? "").trim();
 
-  if (!result.removed && result.reason === "used") {
-    return NextResponse.json({ error: "Categoria em uso por produtos cadastrados." }, { status: 409 });
+  const [cat] = await db
+    .select()
+    .from(categories)
+    .where(ilike(categories.name, name))
+    .limit(1);
+
+  if (!cat) {
+    return NextResponse.json({ error: "Categoria nao encontrada no banco de dados." }, { status: 404 });
   }
 
-  if (!result.removed) {
-    return NextResponse.json({ error: "Categoria nao encontrada." }, { status: 404 });
+  const [usedBy] = await db
+    .select({ id: products.id })
+    .from(products)
+    .where(eq(products.categoryId, cat.id))
+    .limit(1);
+
+  if (usedBy) {
+    return NextResponse.json(
+      { error: "Categoria em uso por produtos cadastrados. Remova ou reatribua os produtos antes de excluir a categoria." },
+      { status: 409 }
+    );
   }
 
+  await db.delete(categories).where(eq(categories.id, cat.id));
   return NextResponse.json({ success: true });
 }

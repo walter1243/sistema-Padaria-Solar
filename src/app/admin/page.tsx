@@ -138,7 +138,10 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      setBaseUrl(window.location.origin);
+      // Usa a URL configurada em NEXT_PUBLIC_BASE_URL (produção).
+      // Se não estiver definida, usa a origem atual (localhost em dev).
+      const envUrl = process.env.NEXT_PUBLIC_BASE_URL?.trim();
+      setBaseUrl(envUrl && envUrl.length > 0 ? envUrl : window.location.origin);
     }
   }, []);
 
