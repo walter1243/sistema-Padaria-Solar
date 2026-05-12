@@ -79,9 +79,8 @@ function escapeHtml(text: string) {
 function buildReceiptHtml(receipt: TableReceipt) {
   const lines = receipt.lines
     .map((line) => {
-      // Formata: QTD (4) | DESC (20) | VALOR (18) = 42 caracteres
-      const qty = String(line.quantity).padEnd(4);
-      const desc = escapeHtml(line.description).substring(0, 20).padEnd(20);
+      const qty = String(line.quantity).padEnd(3);
+      const desc = escapeHtml(line.description).substring(0, 19).padEnd(19);
       const valor = currency(line.total).padStart(12).substring(0, 12);
       return `${qty} ${desc} ${valor}`;
     })
@@ -92,7 +91,7 @@ function buildReceiptHtml(receipt: TableReceipt) {
   const paymentText = paymentMethodLabel(receipt.method);
   
   const divider = "-".repeat(42);
-  const footerDivider = "_".repeat(42);
+  const cutLine = "_".repeat(42);
 
   return `<!doctype html>
 <html lang="pt-BR">
@@ -101,26 +100,53 @@ function buildReceiptHtml(receipt: TableReceipt) {
     <title>Cupom Mesa ${receipt.tableId}</title>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 80mm; }
       body { 
         font-family: 'Courier New', monospace; 
-        color: #000; 
-        padding: 0;
-        width: 80mm;
-        font-size: 11px;
-        line-height: 1.2;
+        color: #000;
+        background: #fff;
+        padding: 4px;
+        font-size: 14px;
+        font-weight: 600;
+        line-height: 1.3;
       }
       .container { width: 100%; }
       .center { text-align: center; }
       .right { text-align: right; }
-      .divider { margin: 2px 0; white-space: pre; }
-      .header { font-weight: bold; margin: 4px 0; }
-      .item-line { font-family: 'Courier New', monospace; white-space: pre; }
-      .totals { margin: 4px 0; font-weight: bold; }
-      .payment { margin: 2px 0; }
-      .meta { margin: 2px 0; font-size: 10px; }
+      .bold { font-weight: 700; }
+      .divider { margin: 3px 0; white-space: pre; font-weight: 600; }
+      .cut-line { margin: 4px 0; white-space: pre; font-weight: 700; border-top: 2px dashed #000; padding-top: 2px; }
+      .header { font-weight: 700; margin: 2px 0; }
+      .title { font-size: 16px; font-weight: 800; letter-spacing: 1px; }
+      .subtitle { font-size: 14px; font-weight: 700; }
+      .item-line { 
+        font-family: 'Courier New', monospace; 
+        white-space: pre; 
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .totals { 
+        margin: 4px 0; 
+        font-weight: 800; 
+        font-size: 15px;
+        text-align: right;
+      }
+      .payment { 
+        margin: 4px 0; 
+        font-weight: 700;
+        font-size: 13px;
+      }
+      .meta { 
+        margin: 2px 0; 
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .info { 
+        font-size: 12px; 
+        font-weight: 600;
+      }
       @media print {
         body { width: 80mm; padding: 0; margin: 0; }
-        .no-print { display: none; }
       }
     </style>
   </head>
@@ -128,16 +154,16 @@ function buildReceiptHtml(receipt: TableReceipt) {
     <div class="container">
       <!-- Header -->
       <div class="center">
-        <div class="header" style="font-size: 16px; font-weight: bold;">PADARIA SOLAR</div>
-        <div class="header" style="font-size: 14px;">SUPERMERCADO</div>
-        <div class="meta">CNPJ: 13.487.922/0001-17</div>
-        <div class="meta">Mesa ${receipt.tableId}</div>
+        <div class="title">PADARIA SOLAR</div>
+        <div class="subtitle">SUPERMERCADO</div>
+        <div class="info">CNPJ: 13.487.922/0001-17</div>
+        <div class="info bold">Mesa ${receipt.tableId}</div>
       </div>
       
       <div class="divider">${divider}</div>
       
       <!-- Items Header -->
-      <div style="font-weight: bold;">QTD  DESCRICAO             VALOR</div>
+      <div class="bold" style="font-size: 13px;">QTD DESC               VALOR</div>
       <div class="divider">${divider}</div>
       
       <!-- Items -->
@@ -145,13 +171,16 @@ function buildReceiptHtml(receipt: TableReceipt) {
       
       <!-- Totals -->
       <div class="divider">${divider}</div>
-      <div class="totals right">TOTAL: R$ ${(receipt.total / 100).toFixed(2).replace(".", ",")}</div>
+      <div class="totals">TOTAL: R$ ${(receipt.total / 100).toFixed(2).replace(".", ",")}</div>
       
       <!-- Payment Method -->
-      <div class="payment">PAGO EM: ${paymentText}</div>
+      <div class="payment">PAGO: ${paymentText}</div>
       
       <!-- Footer -->
       <div class="meta right">${closedAt}</div>
+      
+      <!-- Cut Line -->
+      <div class="cut-line">${cutLine}</div>
     </div>
   </body>
 </html>`;

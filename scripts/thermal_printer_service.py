@@ -53,6 +53,7 @@ def _safe_text(value: Any) -> str:
 
 def _print_receipt(receipt: dict[str, Any]) -> None:
     printer = Usb(VENDOR_ID, PRODUCT_ID)
+        printer.set(density=15)  # Aumentar densidade de impressão
 
     table_id = _safe_text(receipt.get("tableId", ""))
     method = _safe_text(receipt.get("method", ""))
@@ -65,28 +66,34 @@ def _print_receipt(receipt: dict[str, Any]) -> None:
         closed_at = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
     printer.set(align="center", font="a", width=2, height=2)
-    printer.text("PADARIA SOLAR\n")
+        # ===== CABEÇALHO =====
+        printer.set(align="center", font="a", width=2, height=2, text_type="B")
+        printer.text("PADARIA SOLAR\n")
     printer.set(align="center", width=1, height=1)
-    printer.text("SUPERMERCADO\n")
-    printer.text("CNPJ: 13.487.922/0001-17\n")
+        printer.set(align="center", width=1, height=1, text_type="B")
+        printer.text("SUPERMERCADO\n")
+        printer.set(align="center", font="a", text_type="B")
+        printer.text("CNPJ: 13.487.922/0001-17\n")
     printer.text("-" * 42 + "\n")
 
-    printer.set(align="left", text_type="B")
-    printer.text(f"MESA: {table_id}\n")
-    printer.text(f"PAGAMENTO: {method.upper()}\n")
-    printer.text("-" * 42 + "\n")
+        # ===== DADOS DA MESA =====
+        printer.set(align="left", text_type="B", font="a")
+        printer.text(f"MESA: {table_id}\n")
+        printer.text(f"PAGAMENTO: {method.upper()}\n")
+        printer.text("-" * 42 + "\n")
 
-    header = "{:<4}{:<20}{:>9}".format("QTD", "DESCRICAO", "VALOR")
+        # ===== ITENS =====
+        header = "{:<3}{:<19}{:>9}".format("QTD", "DESCRICAO", "VALOR")
     printer.set(align="left", text_type="NORMAL")
     printer.text(header + "\n")
     printer.text("-" * 42 + "\n")
 
     for line in lines:
         qty = int(line.get("quantity", 0))
-        desc = _safe_text(line.get("description", ""))[:20]
+            desc = _safe_text(line.get("description", ""))[:19]
         line_total = float(line.get("total", 0))
 
-        row = "{:<4}{:<20}{:>9}".format(
+            row = "{:<3}{:<19}{:>9}".format(
             qty,
             desc,
             _money(line_total),
@@ -102,6 +109,8 @@ def _print_receipt(receipt: dict[str, Any]) -> None:
     printer.set(align="right")
     printer.text(f"{closed_at}\n")
 
+        # ===== CORTE DE PAPEL =====
+        printer.text("_" * 42 + "\n")
     printer.cut()
 
 
