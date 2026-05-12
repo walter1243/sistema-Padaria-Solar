@@ -353,12 +353,17 @@ export default function AdminPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const media = window.matchMedia("(min-width: 1024px)");
-    const update = () => setIsDesktopPrintEnabled(media.matches);
+    const widthMedia = window.matchMedia("(min-width: 768px)");
+    const pointerMedia = window.matchMedia("(hover: hover) and (pointer: fine)");
+    const update = () => setIsDesktopPrintEnabled(widthMedia.matches || pointerMedia.matches);
     update();
 
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
+    widthMedia.addEventListener("change", update);
+    pointerMedia.addEventListener("change", update);
+    return () => {
+      widthMedia.removeEventListener("change", update);
+      pointerMedia.removeEventListener("change", update);
+    };
   }, []);
 
   const dashboardMetrics = useMemo(() => {
@@ -439,11 +444,9 @@ export default function AdminPage() {
       setFormNotice("Cupom enviado para impressora termica.");
       return;
     } catch (error) {
-      // Fallback: browser print.
       const message = error instanceof Error ? error.message : "Falha ao imprimir na termica.";
-      setError(`${message} Usando impressao do navegador como alternativa.`);
-      printReceipt(receipt);
-      setFormNotice("Impressao via navegador (servico termico indisponivel).");
+      setError(`${message} Nao foi enviada impressao comum para evitar cupom sem corte.`);
+      setFormNotice("Impressao termica falhou. Verifique a conexao da Elgin i9 e o servico local.");
     }
   }
 
@@ -460,11 +463,9 @@ export default function AdminPage() {
       setFormNotice("Reimpressao enviada para impressora termica.");
       return;
     } catch (error) {
-      // Fallback: use in-browser copy.
       const message = error instanceof Error ? error.message : "Falha ao reimprimir na termica.";
-      setError(`${message} Usando reimpressao do navegador como alternativa.`);
-      printReceipt(lastPrintedReceipt);
-      setFormNotice("Reimpressao via navegador (servico termico indisponivel).");
+      setError(`${message} Reimpressao comum bloqueada para manter corte na termica.`);
+      setFormNotice("Reimpressao termica falhou. Confira a Elgin i9 e o bridge local.");
     }
   }
 
@@ -1753,7 +1754,6 @@ export default function AdminPage() {
               </div>
               <div className="mt-2 flex flex-wrap gap-4 text-xs text-[#9bb0d0]">
                 <span>Mesa: {receiptModal.tableId}</span>
-                <span>Sessao: {receiptModal.sessionId}</span>
                 <span>Pagamento: {paymentMethodLabel(receiptModal.method)}</span>
                 <span>Data: {new Date(receiptModal.closedAt).toLocaleString("pt-BR")}</span>
               </div>

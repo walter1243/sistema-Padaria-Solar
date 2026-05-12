@@ -18,20 +18,46 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 
+import usb.backend.libusb1
+import usb.core
+import usb.util
 from escpos.printer import Usb, Win32Raw
+from libusb_package import find_library
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("THERMAL_PRINTER_PORT", "8765"))
-VENDOR_ID = int(os.environ.get("THERMAL_PRINTER_VENDOR_ID", "0x04b8"), 16)
-DEFAULT_PRODUCT_ID = int(os.environ.get("THERMAL_PRINTER_PRODUCT_ID", "0x0e15"), 16)
-PRODUCT_ID_CANDIDATES = [
-    DEFAULT_PRODUCT_ID,
-    0x0202,
-    0x0E15,
-]
+DEFAULT_USB_CANDIDATES = "04b8:0e15,04b8:0202,062a:4101"
+USB_CANDIDATES_RAW = os.environ.get("THERMAL_PRINTER_USB_CANDIDATES", DEFAULT_USB_CANDIDATES)
 WINDOWS_PRINTER_NAME = os.environ.get("THERMAL_PRINTER_WINDOWS_NAME", "").strip()
+WINDOWS_PRINTER_CANDIDATES = [
+    name.strip()
+    for name in os.environ.get(
+        "THERMAL_PRINTER_WINDOWS_CANDIDATES",
+        "ELGIN i9(USB),ELGIN i9 USB,ELGIN i9,Bematech i9",
+    ).split(",")
+    if name.strip()
+]
 
 LAST_RECEIPT: dict[str, Any] | None = None
+
+
+def _parse_usb_candidates(raw: str) -> list[tuple[int, int]]:
+    pairs: list[tuple[int, int]] = []
+    for token in raw.split(","):
+        item = token.strip().lower()
+        if not item:
+            continue
+        if ":" not in item:
+            continue
+        vendor_hex, product_hex = item.split(":", 1)
+        try:
+            pairs.append((int(vendor_hex, 16), int(product_hex, 16)))
+        except ValueError:
+            continue
+    return pairs
+
+
+USB_DEVICE_CANDIDATES = _parse_usb_candidates(USB_CANDIDATES_RAW)
 
 
 def _respond(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
@@ -58,24 +84,70 @@ def _safe_text(value: Any) -> str:
 
 
 def _connect_printer() -> Any:
-    if WINDOWS_PRINTER_NAME:
-        return Win32Raw(WINDOWS_PRINTER_NAME)
+    win_names = [WINDOWS_PRINTER_NAME] if WINDOWS_PRINTER_NAME else WINDOWS_PRINTER_CANDIDATES
+    win_errors: list[str] = []
+
+    for printer_name in win_names:
+        try:
+            printer = Win32Raw(printer_name)
+            printer.open()
+            return printer
+        except Exception as exc:  # pylint: disable=broad-except
+            win_errors.append(f"{printer_name}: {exc}")
 
     last_error: Exception | None = None
-    seen_ids: set[int] = set()
+    seen_ids: set[tuple[int, int]] = set()
 
-    for product_id in PRODUCT_ID_CANDIDATES:
-        if product_id in seen_ids:
+    for vendor_id, product_id in USB_DEVICE_CANDIDATES:
+        candidate = (vendor_id, product_id)
+        if candidate in seen_ids:
             continue
-        seen_ids.add(product_id)
+        seen_ids.add(candidate)
 
         try:
-            return Usb(VENDOR_ID, product_id)
+            backend = usb.backend.libusb1.get_backend(find_library=find_library)
+            usb_device = usb.core.find(idVendor=vendor_id, idProduct=product_id, backend=backend)
+            if usb_device is None:
+                raise RuntimeError("dispositivo USB nao encontrado")
+
+            try:
+                usb_device.set_configuration()
+            except Exception:
+                # Em alguns drivers a configuracao ja esta ativa.
+                pass
+
+            cfg = usb_device.get_active_configuration()
+            out_ep: int | None = None
+            in_ep: int | None = None
+            for interface in cfg:
+                for endpoint in interface:
+                    direction = usb.util.endpoint_direction(endpoint.bEndpointAddress)
+                    if direction == usb.util.ENDPOINT_OUT and out_ep is None:
+                        out_ep = endpoint.bEndpointAddress
+                    if direction == usb.util.ENDPOINT_IN and in_ep is None:
+                        in_ep = endpoint.bEndpointAddress
+
+            if out_ep is None:
+                raise RuntimeError("endpoint OUT nao encontrado")
+
+            printer = Usb(
+                vendor_id,
+                product_id,
+                timeout=0,
+                backend=backend,
+                out_ep=out_ep,
+                in_ep=in_ep,
+            )
+            printer.open()
+            return printer
         except Exception as exc:  # pylint: disable=broad-except
             last_error = exc
 
     raise RuntimeError(
-        f"Nao foi possivel conectar na impressora USB {hex(VENDOR_ID)} com os produtos {', '.join(hex(pid) for pid in seen_ids)}"
+        "Falha ao conectar na termica via Win32Raw/USB. "
+        f"Win32Raw: {' | '.join(win_errors) if win_errors else 'nao testado'}; "
+        "USB candidatos "
+        + ", ".join(f"{hex(v)}:{hex(p)}" for v, p in seen_ids)
     ) from last_error
 
 
@@ -87,7 +159,7 @@ def _print_receipt(receipt: dict[str, Any]) -> None:
         font="a",
         width=1,
         height=1,
-        text_type="B",
+        bold=True,
     )
 
     table_id = _safe_text(receipt.get("tableId", ""))
@@ -101,21 +173,21 @@ def _print_receipt(receipt: dict[str, Any]) -> None:
         closed_at = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
     # Cabeçalho grande e escuro para a i9
-    printer.set(align="center", font="a", width=2, height=2, text_type="B")
+    printer.set(align="center", font="a", width=2, height=2, bold=True)
     printer.text("PADARIA SOLAR\n")
     printer.text("SUPERMERCADO\n")
-    printer.set(align="center", font="a", width=1, height=1, text_type="B")
+    printer.set(align="center", font="a", width=1, height=1, bold=True)
     printer.text("CNPJ: 13.487.922/0001-17\n")
     printer.text("=" * 42 + "\n")
 
     # Dados da mesa
-    printer.set(align="left", font="a", text_type="B")
+    printer.set(align="left", font="a", bold=True)
     printer.text(f"MESA: {table_id}\n")
     printer.text(f"PAGAMENTO: {method.upper()}\n")
     printer.text("-" * 42 + "\n")
 
     # Cabeçalho dos itens
-    printer.set(align="left", font="a", text_type="B")
+    printer.set(align="left", font="a", bold=True)
     header = "{:<4}{:<20}{:>10}".format("QTD", "DESCRICAO", "VALOR")
     printer.text(header + "\n")
     printer.text("-" * 42 + "\n")
@@ -135,10 +207,10 @@ def _print_receipt(receipt: dict[str, Any]) -> None:
     # Espaço mínimo apenas para o corte ficar abaixo da última linha
     printer.text("\n")
     printer.text("-" * 42 + "\n")
-    printer.set(align="right", font="a", text_type="B")
+    printer.set(align="right", font="a", bold=True)
     printer.text(f"TOTAL: {_money(total)}\n")
 
-    printer.set(align="left", font="a", text_type="B")
+    printer.set(align="left", font="a", bold=True)
     printer.text(f"Pedidos: {order_count}\n")
     printer.set(align="right")
     printer.text(f"{closed_at}\n")
@@ -162,8 +234,7 @@ class PrinterHandler(BaseHTTPRequestHandler):
                     "service": "thermal-printer-bridge",
                     "host": HOST,
                     "port": PORT,
-                    "vendorId": hex(VENDOR_ID),
-                    "productIds": [hex(pid) for pid in PRODUCT_ID_CANDIDATES],
+                    "usbCandidates": [f"{hex(v)}:{hex(p)}" for v, p in USB_DEVICE_CANDIDATES],
                     "windowsPrinterName": WINDOWS_PRINTER_NAME or None,
                     "hasLastReceipt": LAST_RECEIPT is not None,
                 },
@@ -218,8 +289,8 @@ def main() -> None:
     server = HTTPServer((HOST, PORT), PrinterHandler)
     print(f"[thermal-printer-bridge] Running on http://{HOST}:{PORT}")
     print(
-        "[thermal-printer-bridge] USB vendor="
-        f"{hex(VENDOR_ID)} products={', '.join(hex(pid) for pid in PRODUCT_ID_CANDIDATES)}"
+        "[thermal-printer-bridge] USB candidates="
+        + ", ".join(f"{hex(v)}:{hex(p)}" for v, p in USB_DEVICE_CANDIDATES)
     )
     print("[thermal-printer-bridge] Ctrl+C to stop")
     server.serve_forever()
