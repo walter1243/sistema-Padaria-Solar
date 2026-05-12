@@ -78,18 +78,21 @@ function escapeHtml(text: string) {
 
 function buildReceiptHtml(receipt: TableReceipt) {
   const lines = receipt.lines
-    .map(
-      (line) => `
-        <tr>
-          <td>${line.quantity}</td>
-          <td>${escapeHtml(line.description)}</td>
-          <td class="right">${currency(line.unitPrice)}</td>
-          <td class="right">${currency(line.total)}</td>
-        </tr>`,
-    )
+    .map((line) => {
+      // Formata: QTD (4) | DESC (20) | VALOR (18) = 42 caracteres
+      const qty = String(line.quantity).padEnd(4);
+      const desc = escapeHtml(line.description).substring(0, 20).padEnd(20);
+      const valor = currency(line.total).padStart(12).substring(0, 12);
+      return `${qty} ${desc} ${valor}`;
+    })
+    .map((line) => `<div class="item-line">${line}</div>`)
     .join("");
 
   const closedAt = new Date(receipt.closedAt).toLocaleString("pt-BR");
+  const paymentText = paymentMethodLabel(receipt.method);
+  
+  const divider = "-".repeat(42);
+  const footerDivider = "_".repeat(42);
 
   return `<!doctype html>
 <html lang="pt-BR">
@@ -97,43 +100,59 @@ function buildReceiptHtml(receipt: TableReceipt) {
     <meta charset="utf-8" />
     <title>Cupom Mesa ${receipt.tableId}</title>
     <style>
-      body { font-family: 'Courier New', monospace; color: #111; padding: 16px; }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { 
+        font-family: 'Courier New', monospace; 
+        color: #000; 
+        padding: 0;
+        width: 80mm;
+        font-size: 11px;
+        line-height: 1.2;
+      }
+      .container { width: 100%; }
       .center { text-align: center; }
       .right { text-align: right; }
-      .divider { border-top: 1px dashed #111; margin: 8px 0; }
-      table { width: 100%; border-collapse: collapse; font-size: 12px; }
-      th, td { padding: 4px 2px; vertical-align: top; }
-      th { border-bottom: 1px solid #111; text-align: left; }
-      .totals { margin-top: 10px; font-size: 14px; font-weight: bold; }
-      .meta { margin-top: 8px; font-size: 12px; }
+      .divider { margin: 2px 0; white-space: pre; }
+      .header { font-weight: bold; margin: 4px 0; }
+      .item-line { font-family: 'Courier New', monospace; white-space: pre; }
+      .totals { margin: 4px 0; font-weight: bold; }
+      .payment { margin: 2px 0; }
+      .meta { margin: 2px 0; font-size: 10px; }
       @media print {
-        body { width: 78mm; padding: 0; }
+        body { width: 80mm; padding: 0; margin: 0; }
+        .no-print { display: none; }
       }
     </style>
   </head>
   <body>
-    <div class="center">
-      <h2 style="margin:0">PADARIA SOLAR SUPERMERCADO</h2>
-      <div>CNPJ: 13.487.922/0001-17</div>
-      <div>Mesa ${receipt.tableId} | Sessao ${escapeHtml(receipt.sessionId)}</div>
+    <div class="container">
+      <!-- Header -->
+      <div class="center">
+        <div class="header" style="font-size: 16px; font-weight: bold;">PADARIA SOLAR</div>
+        <div class="header" style="font-size: 14px;">SUPERMERCADO</div>
+        <div class="meta">CNPJ: 13.487.922/0001-17</div>
+        <div class="meta">Mesa ${receipt.tableId}</div>
+      </div>
+      
+      <div class="divider">${divider}</div>
+      
+      <!-- Items Header -->
+      <div style="font-weight: bold;">QTD  DESCRICAO             VALOR</div>
+      <div class="divider">${divider}</div>
+      
+      <!-- Items -->
+      ${lines}
+      
+      <!-- Totals -->
+      <div class="divider">${divider}</div>
+      <div class="totals right">TOTAL: R$ ${(receipt.total / 100).toFixed(2).replace(".", ",")}</div>
+      
+      <!-- Payment Method -->
+      <div class="payment">PAGO EM: ${paymentText}</div>
+      
+      <!-- Footer -->
+      <div class="meta right">${closedAt}</div>
     </div>
-    <div class="divider"></div>
-    <table>
-      <thead>
-        <tr>
-          <th>QTD</th>
-          <th>DESCRICAO</th>
-          <th class="right">UNIT</th>
-          <th class="right">VALOR</th>
-        </tr>
-      </thead>
-      <tbody>${lines}</tbody>
-    </table>
-    <div class="divider"></div>
-    <div class="totals right">TOTAL: ${currency(receipt.total)}</div>
-    <div class="meta">Forma de pagamento: ${paymentMethodLabel(receipt.method)}</div>
-    <div class="meta">Pedidos fechados: ${receipt.orderCount}</div>
-    <div class="meta right">${closedAt}</div>
   </body>
 </html>`;
 }

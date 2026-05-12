@@ -55,7 +55,6 @@ def _print_receipt(receipt: dict[str, Any]) -> None:
     printer = Usb(VENDOR_ID, PRODUCT_ID)
 
     table_id = _safe_text(receipt.get("tableId", ""))
-    session_id = _safe_text(receipt.get("sessionId", ""))
     method = _safe_text(receipt.get("method", ""))
     total = float(receipt.get("total", 0))
     order_count = int(receipt.get("orderCount", 0))
@@ -70,42 +69,39 @@ def _print_receipt(receipt: dict[str, Any]) -> None:
     printer.set(align="center", width=1, height=1)
     printer.text("SUPERMERCADO\n")
     printer.text("CNPJ: 13.487.922/0001-17\n")
-    printer.text("-" * 48 + "\n")
+    printer.text("-" * 42 + "\n")
 
     printer.set(align="left", text_type="B")
-    printer.text(f"MESA: {table_id}  SESSAO: {session_id}\n")
+    printer.text(f"MESA: {table_id}\n")
     printer.text(f"PAGAMENTO: {method.upper()}\n")
-    printer.text("-" * 48 + "\n")
+    printer.text("-" * 42 + "\n")
 
-    header = "{:<5}{:<21}{:>10}{:>12}".format("QTD", "DESCRICAO", "UNIT", "VALOR")
+    header = "{:<4}{:<20}{:>9}".format("QTD", "DESCRICAO", "VALOR")
     printer.set(align="left", text_type="NORMAL")
     printer.text(header + "\n")
-    printer.text("-" * 48 + "\n")
+    printer.text("-" * 42 + "\n")
 
     for line in lines:
         qty = int(line.get("quantity", 0))
-        desc = _safe_text(line.get("description", ""))[:21]
-        unit_price = float(line.get("unitPrice", 0))
+        desc = _safe_text(line.get("description", ""))[:20]
         line_total = float(line.get("total", 0))
 
-        row = "{:<5}{:<21}{:>10}{:>12}".format(
+        row = "{:<4}{:<20}{:>9}".format(
             qty,
             desc,
-            _money(unit_price),
             _money(line_total),
         )
         printer.text(row + "\n")
 
-    printer.text("-" * 48 + "\n")
+    printer.text("-" * 42 + "\n")
     printer.set(align="right", text_type="B")
     printer.text(f"TOTAL: {_money(total)}\n")
 
     printer.set(align="left", text_type="NORMAL")
-    printer.text(f"Pedidos fechados: {order_count}\n")
+    printer.text(f"Pedidos: {order_count}\n")
     printer.set(align="right")
     printer.text(f"{closed_at}\n")
 
-    printer.text("\n\n")
     printer.cut()
 
 
