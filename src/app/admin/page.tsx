@@ -1,7 +1,17 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { MenuCategory, MenuItem, Order, OrderStatus, PaymentMethod, PaymentRecord, UnitMeasure, Addon } from "@/lib/types";
+import {
+  Addon,
+  MenuCategory,
+  MenuItem,
+  Order,
+  OrderStatus,
+  PaymentMethod,
+  PaymentRecord,
+  TableReceipt,
+  UnitMeasure,
+} from "@/lib/types";
 
 const statusFlow: OrderStatus[] = ["novo", "preparando", "pronto", "entregue"];
 
@@ -24,6 +34,16 @@ type TableSummary = {
   orders: Order[];
 };
 
+type CloseTableResponse = {
+  closedOrders: number;
+  total: number;
+  payment: PaymentRecord | null;
+  receipt: TableReceipt | null;
+};
+
+const LAST_RECEIPT_STORAGE_KEY = "padaria:last-printed-receipt";
+const THERMAL_BRIDGE_URL = "http://127.0.0.1:8765";
+
 type ProductDraft = {
   name: string;
   description: string;
@@ -36,6 +56,86 @@ type ProductDraft = {
 
 function currency(value: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
+}
+
+function paymentMethodLabel(method: PaymentMethod) {
+  const labels: Record<PaymentMethod, string> = {
+    dinheiro: "Dinheiro",
+    pix: "Pix",
+    cartao: "Cartao",
+  };
+  return labels[method];
+}
+
+function escapeHtml(text: string) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function buildReceiptHtml(receipt: TableReceipt) {
+  const lines = receipt.lines
+    .map(
+      (line) => `
+        <tr>
+          <td>${line.quantity}</td>
+          <td>${escapeHtml(line.description)}</td>
+          <td class="right">${currency(line.unitPrice)}</td>
+          <td class="right">${currency(line.total)}</td>
+        </tr>`,
+    )
+    .join("");
+
+  const closedAt = new Date(receipt.closedAt).toLocaleString("pt-BR");
+
+  return `<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <title>Cupom Mesa ${receipt.tableId}</title>
+    <style>
+      body { font-family: 'Courier New', monospace; color: #111; padding: 16px; }
+      .center { text-align: center; }
+      .right { text-align: right; }
+      .divider { border-top: 1px dashed #111; margin: 8px 0; }
+      table { width: 100%; border-collapse: collapse; font-size: 12px; }
+      th, td { padding: 4px 2px; vertical-align: top; }
+      th { border-bottom: 1px solid #111; text-align: left; }
+      .totals { margin-top: 10px; font-size: 14px; font-weight: bold; }
+      .meta { margin-top: 8px; font-size: 12px; }
+      @media print {
+        body { width: 78mm; padding: 0; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="center">
+      <h2 style="margin:0">PADARIA SOLAR SUPERMERCADO</h2>
+      <div>CNPJ: 13.487.922/0001-17</div>
+      <div>Mesa ${receipt.tableId} | Sessao ${escapeHtml(receipt.sessionId)}</div>
+    </div>
+    <div class="divider"></div>
+    <table>
+      <thead>
+        <tr>
+          <th>QTD</th>
+          <th>DESCRICAO</th>
+          <th class="right">UNIT</th>
+          <th class="right">VALOR</th>
+        </tr>
+      </thead>
+      <tbody>${lines}</tbody>
+    </table>
+    <div class="divider"></div>
+    <div class="totals right">TOTAL: ${currency(receipt.total)}</div>
+    <div class="meta">Forma de pagamento: ${paymentMethodLabel(receipt.method)}</div>
+    <div class="meta">Pedidos fechados: ${receipt.orderCount}</div>
+    <div class="meta right">${closedAt}</div>
+  </body>
+</html>`;
 }
 
 function statusLabel(status: OrderStatus) {
@@ -108,6 +208,9 @@ export default function AdminPage() {
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [closeTableId, setCloseTableId] = useState<string | null>(null);
   const [closePaymentMethod, setClosePaymentMethod] = useState<PaymentMethod>("dinheiro");
+  const [receiptModal, setReceiptModal] = useState<TableReceipt | null>(null);
+  const [lastPrintedReceipt, setLastPrintedReceipt] = useState<TableReceipt | null>(null);
+  const [isDesktopPrintEnabled, setIsDesktopPrintEnabled] = useState(false);
 
   async function loadData() {
     const [menuRes, ordersRes, categoriesRes, bakerRes, adminRes, reportsRes, tablesRes] = await Promise.all([
@@ -186,6 +289,30 @@ export default function AdminPage() {
     }
   }, [authorized, refreshTick]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const serialized = window.localStorage.getItem(LAST_RECEIPT_STORAGE_KEY);
+    if (!serialized) return;
+
+    try {
+      const parsed = JSON.parse(serialized) as TableReceipt;
+      setLastPrintedReceipt(parsed);
+    } catch {
+      window.localStorage.removeItem(LAST_RECEIPT_STORAGE_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const media = window.matchMedia("(min-width: 1024px)");
+    const update = () => setIsDesktopPrintEnabled(media.matches);
+    update();
+
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
   const dashboardMetrics = useMemo(() => {
     const deliveredOrders = orders.filter((order) => order.status === "entregue");
     const soldItems = deliveredOrders.reduce(
@@ -207,6 +334,100 @@ export default function AdminPage() {
     if (!selectedTableId) return null;
     return tableSummaries.find((table) => table.tableId === selectedTableId) || null;
   }, [selectedTableId, tableSummaries]);
+
+  function printReceipt(receipt: TableReceipt) {
+    if (typeof window === "undefined") return;
+
+    const printWindow = window.open("", "_blank", "noopener,noreferrer,width=420,height=720");
+    if (!printWindow) {
+      setError("Nao foi possivel abrir a janela de impressao. Verifique o bloqueio de pop-up.");
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(buildReceiptHtml(receipt));
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  }
+
+  async function printWithThermalBridge(receipt: TableReceipt) {
+    const response = await fetch(`${THERMAL_BRIDGE_URL}/print-receipt`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(receipt),
+    });
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new Error(payload.error || "Falha ao imprimir na termica.");
+    }
+  }
+
+  async function reprintWithThermalBridge() {
+    const response = await fetch(`${THERMAL_BRIDGE_URL}/reprint-last`, {
+      method: "POST",
+    });
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new Error(payload.error || "Falha ao reimprimir na termica.");
+    }
+  }
+
+  async function handlePrintReceipt(receipt: TableReceipt) {
+    setLastPrintedReceipt(receipt);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(LAST_RECEIPT_STORAGE_KEY, JSON.stringify(receipt));
+    }
+
+    if (!isDesktopPrintEnabled) return;
+
+    try {
+      await printWithThermalBridge(receipt);
+      setFormNotice("Cupom enviado para impressora termica.");
+      return;
+    } catch {
+      // Fallback: browser print.
+      printReceipt(receipt);
+      setFormNotice("Impressao via navegador (servico termico indisponivel).");
+    }
+  }
+
+  async function handleReprintLastReceipt() {
+    if (!isDesktopPrintEnabled) return;
+
+    if (!lastPrintedReceipt) {
+      setError("Ainda nao existe cupom anterior impresso para reimprimir.");
+      return;
+    }
+
+    try {
+      await reprintWithThermalBridge();
+      setFormNotice("Reimpressao enviada para impressora termica.");
+      return;
+    } catch {
+      // Fallback: use in-browser copy.
+      printReceipt(lastPrintedReceipt);
+      setFormNotice("Reimpressao via navegador (servico termico indisponivel).");
+    }
+  }
+
+  useEffect(() => {
+    if (!authorized || typeof window === "undefined") return;
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (!isDesktopPrintEnabled) return;
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "p") return;
+      if (!lastPrintedReceipt) return;
+
+      event.preventDefault();
+      void handleReprintLastReceipt();
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [authorized, isDesktopPrintEnabled, lastPrintedReceipt]);
 
   async function login(e: FormEvent) {
     e.preventDefault();
@@ -560,10 +781,15 @@ export default function AdminPage() {
       return;
     }
 
+    const data = (await res.json()) as CloseTableResponse;
+
     setCloseTableId(null);
     setClosePaymentMethod("dinheiro");
     setError("");
     setFormNotice("Mesa fechada com pagamento registrado com sucesso.");
+    if (data.receipt) {
+      setReceiptModal(data.receipt);
+    }
     loadData();
   }
 
@@ -1444,6 +1670,93 @@ export default function AdminPage() {
                 className="flex-1 rounded-lg bg-[#c81f2f] px-4 py-3 font-bold text-white"
               >
                 Confirmar fechamento
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {receiptModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-3xl rounded-2xl border border-[#365682] bg-[#0b1424] p-6 mx-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-2xl font-bold text-white">Cupom fiscal - Mesa {receiptModal.tableId}</h3>
+                <p className="mt-1 text-sm text-[#b2c5e2]">Confira os itens consumidos antes de imprimir.</p>
+              </div>
+              {isDesktopPrintEnabled && (
+                <p className="text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">
+                  Atalho reimpressao: Ctrl+P
+                </p>
+              )}
+            </div>
+
+            <div className="mt-4 rounded-xl border border-[#2f466d] bg-[#091426] p-4 text-sm text-[#dbe7fb]">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="font-bold">Padaria Solar Supermercado</p>
+                <p>CNPJ: 13.487.922/0001-17</p>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-4 text-xs text-[#9bb0d0]">
+                <span>Mesa: {receiptModal.tableId}</span>
+                <span>Sessao: {receiptModal.sessionId}</span>
+                <span>Pagamento: {paymentMethodLabel(receiptModal.method)}</span>
+                <span>Data: {new Date(receiptModal.closedAt).toLocaleString("pt-BR")}</span>
+              </div>
+
+              <div className="mt-4 overflow-x-auto">
+                <table className="w-full min-w-[640px] border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-[#2b4062] text-left text-[#8db5ff]">
+                      <th className="px-2 py-2">QTD</th>
+                      <th className="px-2 py-2">Descricao</th>
+                      <th className="px-2 py-2 text-right">Valor un.</th>
+                      <th className="px-2 py-2 text-right">Subtotal</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {receiptModal.lines.map((line) => (
+                      <tr key={`${line.description}-${line.unitPrice}`} className="border-b border-[#1c2f4a] text-[#d6e3f8]">
+                        <td className="px-2 py-2">{line.quantity}</td>
+                        <td className="px-2 py-2">{line.description}</td>
+                        <td className="px-2 py-2 text-right">{currency(line.unitPrice)}</td>
+                        <td className="px-2 py-2 text-right font-bold">{currency(line.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-[#9bb0d0]">Pedidos fechados: {receiptModal.orderCount}</p>
+                <p className="text-lg font-black text-[#ff8c98]">TOTAL: {currency(receiptModal.total)}</p>
+              </div>
+            </div>
+
+            <div className="mt-5 flex flex-wrap gap-2">
+              {isDesktopPrintEnabled && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => void handlePrintReceipt(receiptModal)}
+                    className="rounded-lg bg-[#0f5bd4] px-4 py-3 font-bold text-white"
+                  >
+                    Imprimir cupom
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleReprintLastReceipt()}
+                    className="rounded-lg border border-[#365682] bg-[#13233f] px-4 py-3 font-bold text-[#d9e7ff]"
+                  >
+                    Reimprimir ultimo (Ctrl+P)
+                  </button>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={() => setReceiptModal(null)}
+                className="rounded-lg border border-[#365682] bg-[#13233f] px-4 py-3 font-bold text-[#d9e7ff]"
+              >
+                Fechar
               </button>
             </div>
           </div>

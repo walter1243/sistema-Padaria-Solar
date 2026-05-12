@@ -35,6 +35,23 @@ export type PaymentRecord = {
   closedAt: string;
 };
 
+export type ReceiptLineItem = {
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  total: number;
+};
+
+export type TableReceipt = {
+  tableId: string;
+  sessionId: string;
+  method: PaymentMethod;
+  total: number;
+  closedAt: string;
+  orderCount: number;
+  lines: ReceiptLineItem[];
+};
+
 export type OrderStatus = "novo" | "preparando" | "pronto" | "entregue";
 
 export type OrderItem = {

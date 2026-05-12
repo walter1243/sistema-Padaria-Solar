@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orderItems, orders, payments, products, tableSessions } from "@/lib/db/schema";
-import { Order, OrderItem, OrderStatus, PaymentMethod, PaymentRecord } from "@/lib/types";
+import { Order, OrderItem, OrderStatus, PaymentMethod, PaymentRecord, ReceiptLineItem, TableReceipt } from "@/lib/types";
 
 export type TableSessionValidation = {
   allowed: boolean;
@@ -184,7 +184,7 @@ export async function closeTableWithPaymentInDb(tableId: string, method: Payment
   });
 
   if (!activeSession) {
-    return { closedOrders: 0, total: 0, payment: null as PaymentRecord | null };
+    return { closedOrders: 0, total: 0, payment: null as PaymentRecord | null, receipt: null as TableReceipt | null };
   }
 
   const activeOrders = await db
@@ -199,10 +199,33 @@ export async function closeTableWithPaymentInDb(tableId: string, method: Payment
       .update(tableSessions)
       .set({ status: "closed", closedAt: new Date() })
       .where(eq(tableSessions.id, activeSession.id));
-    return { closedOrders: 0, total: 0, payment: null as PaymentRecord | null };
+    return { closedOrders: 0, total: 0, payment: null as PaymentRecord | null, receipt: null as TableReceipt | null };
   }
 
   const activeOrderIds = activeOrders.map((order) => order.id);
+  const consumedItems = await db.select().from(orderItems).where(inArray(orderItems.orderId, activeOrderIds));
+
+  const aggregated = new Map<string, ReceiptLineItem>();
+  for (const item of consumedItems) {
+    const unitPrice = Number(item.price);
+    const key = `${item.name}::${unitPrice.toFixed(2)}`;
+    const current = aggregated.get(key);
+    if (current) {
+      current.quantity += item.quantity;
+      current.total += unitPrice * item.quantity;
+      continue;
+    }
+
+    aggregated.set(key, {
+      description: item.name,
+      quantity: item.quantity,
+      unitPrice,
+      total: unitPrice * item.quantity,
+    });
+  }
+
+  const lines = Array.from(aggregated.values()).sort((a, b) => a.description.localeCompare(b.description, "pt-BR"));
+
   await db.update(orders).set({ status: "entregue" }).where(inArray(orders.id, activeOrderIds));
 
   const [payment] = await db
@@ -219,6 +242,16 @@ export async function closeTableWithPaymentInDb(tableId: string, method: Payment
     .set({ status: "closed", closedAt: new Date() })
     .where(eq(tableSessions.id, activeSession.id));
 
+  const receipt: TableReceipt = {
+    tableId: normalizedTableId,
+    sessionId: activeSession.sessionId,
+    method,
+    total,
+    closedAt: toIsoString(payment.closedAt),
+    orderCount: activeOrders.length,
+    lines,
+  };
+
   return {
     closedOrders: activeOrders.length,
     total,
@@ -229,6 +262,7 @@ export async function closeTableWithPaymentInDb(tableId: string, method: Payment
       method: payment.method as PaymentMethod,
       closedAt: toIsoString(payment.closedAt),
     },
+    receipt,
   };
 }
 
