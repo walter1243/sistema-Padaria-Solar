@@ -82,6 +82,7 @@ export default function AdminPage() {
   const [activeSection, setActiveSection] = useState<AdminSection>("dashboard");
   const [formNotice, setFormNotice] = useState("");
   const [categories, setCategories] = useState<string[]>([]);
+  const [newCategoryName, setNewCategoryName] = useState("");
   const [kitchenUser, setKitchenUser] = useState("");
   const [kitchenPass, setKitchenPass] = useState("");
   const [adminUser, setAdminUser] = useState("");
@@ -398,6 +399,57 @@ export default function AdminPage() {
     setAdminConfirmPassword("");
     setError("");
     setFormNotice("Perfil do admin atualizado com sucesso.");
+  }
+
+  async function addMenuCategory() {
+    const name = newCategoryName.trim();
+    if (!name) {
+      setError("Informe o nome da categoria para adicionar.");
+      return;
+    }
+
+    const res = await fetch("/api/categories", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+
+    if (!res.ok) {
+      const payload = (await res.json().catch(() => ({}))) as { error?: string };
+      setError(payload.error || "Nao foi possivel adicionar categoria.");
+      return;
+    }
+
+    setNewCategoryName("");
+    setError("");
+    setFormNotice("Categoria adicionada com sucesso.");
+    await loadData();
+    setCategory(name as MenuCategory);
+  }
+
+  async function removeMenuCategory(categoryName: string) {
+    const res = await fetch("/api/categories", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: categoryName }),
+    });
+
+    if (!res.ok) {
+      const payload = (await res.json().catch(() => ({}))) as { error?: string };
+      setError(payload.error || "Nao foi possivel remover categoria.");
+      return;
+    }
+
+    setError("");
+    setFormNotice(`Categoria ${categoryName} removida com sucesso.`);
+    await loadData();
+
+    if (category === categoryName) {
+      setCategory("Salgado");
+    }
+    if (searchCategory === categoryName) {
+      setSearchCategory("");
+    }
   }
 
   async function toggleAvailability(item: MenuItem) {
@@ -784,6 +836,45 @@ export default function AdminPage() {
                   </button>
                 </div>
 
+                <section className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4 shadow-[0_10px_24px_rgba(0,0,0,0.35)]">
+                  <h2 className="text-xl font-bold text-white">Categorias do cardapio</h2>
+                  <p className="mt-1 text-xs text-[#9bb0d0]">Adicione ou remova categorias usadas no cadastro de produtos.</p>
+
+                  <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                    <input
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      placeholder="Nova categoria"
+                      className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]"
+                    />
+                    <button
+                      type="button"
+                      onClick={addMenuCategory}
+                      className="rounded-xl bg-gradient-to-r from-[#0f5bd4] to-[#0f5bd4] px-4 py-2 font-bold text-white"
+                    >
+                      Adicionar
+                    </button>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {categories.map((cat) => (
+                      <div
+                        key={cat}
+                        className="flex items-center gap-2 rounded-lg border border-[#2b4062] bg-[#101d33] px-3 py-2"
+                      >
+                        <span className="text-xs font-bold uppercase tracking-[0.06em] text-[#d6e3f8]">{cat}</span>
+                        <button
+                          type="button"
+                          onClick={() => removeMenuCategory(cat)}
+                          className="rounded px-2 py-1 text-xs font-bold text-[#ff8c98] hover:bg-[#1a2a3f]"
+                        >
+                          Remover
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
                 <div className={`grid gap-4 ${showProductForm ? "xl:grid-cols-[360px_1fr]" : "xl:grid-cols-1"}`}>
                   {showProductForm && (
                     <form
@@ -1026,9 +1117,13 @@ export default function AdminPage() {
                         <span className="inline-block mt-2 text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">
                           {item.category}
                         </span>
-                        <p className="mt-2 text-sm text-[#b2c5e2]">{item.description}</p>
+                        <div className="mt-2 overflow-hidden rounded-lg border border-[#2b4062] bg-[#0b1424]">
+                          <img src={item.imageUrl} alt={item.name} className="h-24 w-full object-cover" />
+                        </div>
                         {item.addons && item.addons.length > 0 && (
-                          <p className="mt-2 text-xs text-[#97afcf]">Acompanhamentos: {item.addons.join(", ")}</p>
+                          <p className="mt-2 text-xs text-[#97afcf]">
+                            Acompanhamentos: {item.addons.map((addon) => addon.name).join(", ")}
+                          </p>
                         )}
                         <p className="mt-2 text-sm font-bold text-[#ff8c98]">{currency(item.price)}</p>
                         <p className="mt-1 text-xs text-[#8db5ff]">Unidade: {item.unit}</p>

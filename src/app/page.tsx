@@ -52,6 +52,7 @@ function HomePageContent() {
   const [addonDraft, setAddonDraft] = useState<Addon[]>([]);
   const [addonNoteDraft, setAddonNoteDraft] = useState("");
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
+  const [previewItem, setPreviewItem] = useState<MenuItem | null>(null);
 
   async function loadMenu() {
     const res = await fetch("/api/menu", { cache: "no-store" });
@@ -202,6 +203,21 @@ function HomePageContent() {
     setAddonDraft([]);
     setAddonNoteDraft("");
     setEditingLineId(null);
+  }
+
+  function openPreview(item: MenuItem) {
+    if (!item.addons || item.addons.length === 0) return;
+    setPreviewItem(item);
+  }
+
+  function closePreview() {
+    setPreviewItem(null);
+  }
+
+  function addFromPreview() {
+    if (!previewItem) return;
+    setPreviewItem(null);
+    openAddonModal(previewItem);
   }
 
   function toggleAddon(addon: Addon) {
@@ -486,7 +502,20 @@ function HomePageContent() {
                     key={item.id}
                     className="overflow-hidden rounded-xl border border-[#213554] bg-[#0f1b30]"
                   >
-                    <img src={item.imageUrl} alt={item.name} className="h-24 w-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => openPreview(item)}
+                      disabled={!item.addons || item.addons.length === 0}
+                      className="block w-full disabled:cursor-default"
+                    >
+                      <img
+                        src={item.imageUrl}
+                        alt={item.name}
+                        className={`h-24 w-full object-cover transition ${
+                          item.addons && item.addons.length > 0 ? "cursor-pointer hover:brightness-110" : ""
+                        }`}
+                      />
+                    </button>
                     <div className="space-y-1 p-2">
                       <p className="line-clamp-1 text-[11px] font-bold uppercase tracking-wide text-[#0f5bd4]">
                         {item.category}
@@ -635,6 +664,45 @@ function HomePageContent() {
                   {editingLineId ? "Salvar" : "Adicionar"}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {previewItem && (
+        <div className="fixed inset-0 z-50 animate-cart-backdrop bg-black/65" onClick={closePreview}>
+          <div className="flex min-h-full items-center justify-center px-4">
+            <div
+              className="w-full max-w-md rounded-2xl border border-[#2b4062] bg-[#0b1424] p-4 shadow-[0_14px_34px_rgba(0,0,0,0.6)]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <h3 className="text-lg font-black text-white">{previewItem.name}</h3>
+                <button
+                  type="button"
+                  onClick={closePreview}
+                  className="rounded-lg border border-[#2f466d] bg-[#13233f] px-2 py-1 text-xs font-bold text-[#d9e7ff]"
+                >
+                  X
+                </button>
+              </div>
+
+              <img
+                src={previewItem.imageUrl}
+                alt={previewItem.name}
+                className="mt-3 h-52 w-full rounded-xl border border-[#2b4062] object-cover"
+              />
+
+              <p className="mt-3 text-sm text-[#c2d4ef]">{previewItem.description}</p>
+              <p className="mt-2 text-lg font-black text-[#ff6b78]">{currency(previewItem.price)}</p>
+
+              <button
+                type="button"
+                onClick={addFromPreview}
+                className="mt-4 w-full rounded-xl bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] px-4 py-3 font-bold text-white"
+              >
+                Adicionar ao carrinho
+              </button>
             </div>
           </div>
         </div>
