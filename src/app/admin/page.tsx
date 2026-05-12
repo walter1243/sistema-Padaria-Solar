@@ -462,16 +462,16 @@ export default function AdminPage() {
     return (
       <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#060b14] px-4 py-10 text-[#eef4ff]">
         <div
-          className="absolute inset-0 bg-cover bg-center"
+          className="absolute inset-0 bg-cover bg-center brightness-[0.94] contrast-[1.1] saturate-[1.08]"
           style={{
             backgroundImage: "url('/images/capa-solar-supermercado.jpg')",
           }}
         />
-        <div className="absolute inset-0 bg-[#020917]/58" />
+        <div className="absolute inset-0 bg-[#020917]/68" />
 
         <form
           onSubmit={login}
-          className="relative z-10 w-full max-w-md rounded-3xl border border-white/12 bg-black/68 p-6 shadow-[0_20px_40px_rgba(0,0,0,0.6)] backdrop-blur-[2px]"
+          className="relative z-10 w-full max-w-md rounded-3xl border border-white/14 bg-black/80 p-6 shadow-[0_24px_50px_rgba(0,0,0,0.7)] backdrop-blur-md"
         >
           <h1 className="text-center text-5xl font-light leading-none tracking-[0.06em] text-white">Padaria Solar</h1>
 
