@@ -475,7 +475,10 @@ export default function AdminPage() {
       window.localStorage.setItem(LAST_RECEIPT_STORAGE_KEY, JSON.stringify(receipt));
     }
 
-    if (!isDesktopPrintEnabled) {
+    // BYPASS TEMPORÁRIO PARA DEBUG: permitir impressão sempre
+    const FORCE_PRINT = true;
+    
+    if (!isDesktopPrintEnabled && !FORCE_PRINT) {
       setError("Impressão desabilitada neste dispositivo (apenas desktop/tablet com impressora).");
       console.log("[HANDLE] Impressão desabilitada. Verifique media queries no console: [DESKTOP_PRINT_DEBUG]");
       return;
@@ -501,7 +504,10 @@ export default function AdminPage() {
   }
 
   async function handleReprintLastReceipt() {
-    if (!isDesktopPrintEnabled) {
+    // BYPASS TEMPORÁRIO PARA DEBUG: permitir impressão sempre
+    const FORCE_PRINT = true;
+    
+    if (!isDesktopPrintEnabled && !FORCE_PRINT) {
       setError("Reimpressão desabilitada neste dispositivo (apenas desktop/tablet com impressora).");
       return;
     }
@@ -533,8 +539,11 @@ export default function AdminPage() {
   useEffect(() => {
     if (!authorized || typeof window === "undefined") return;
 
+    // BYPASS TEMPORÁRIO PARA DEBUG: permitir Ctrl+P sempre
+    const FORCE_PRINT = true;
+
     function onKeyDown(event: KeyboardEvent) {
-      if (!isDesktopPrintEnabled) return;
+      if (!isDesktopPrintEnabled && !FORCE_PRINT) return;
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "p") return;
       if (!lastPrintedReceipt) return;
 
