@@ -1,0 +1,64 @@
+DIAGNÓSTICO E ATIVAÇÃO DA IMPRESSORA TÉRMICA
+=============================================
+
+PASSO 1 - INICIAR O SERVIÇO LOCAL
+==================================
+Na pasta "app padaria", abra um terminal e execute:
+  npm run printer:service
+
+Você verá algo como:
+  [thermal-printer-bridge] Running on http://127.0.0.1:8765
+  [thermal-printer-bridge] USB candidates=...
+
+DEIXE ESTE TERMINAL ABERTO enquanto usar a app!
+
+PASSO 2 - TESTAR SE ESTÁ FUNCIONANDO
+======================================
+Abra outro terminal e execute:
+
+  $body = @{ tableId='1'; method='dinheiro'; total=1000; orderCount=1; closedAt=(Get-Date).ToString('dd/MM/yyyy HH:mm:ss'); lines=@(@{ quantity=1; description='TESTE'; unitPrice=1000; total=1000 }) } | ConvertTo-Json -Depth 6; Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8765/print-receipt" -ContentType "application/json" -Body $body
+
+Se funcionar, verá: {"ok": true, "mode": "print-receipt"}
+
+E papel sairá da impressora com CORTE AUTOMÁTICO.
+
+PASSO 3 - TESTAR NO PAINEL WEB
+================================
+1. Acesse o painel em https://padariasolar.vercel.app
+2. Feche uma mesa
+3. Clique em "Imprimir cupom"
+4. O botão mostrará "Imprimindo..." enquanto envia
+5. Se erro, clique em F12 para abrir console e ver a mensagem
+
+PASSO 4 - SOLUCIONAR PROBLEMAS
+===============================
+
+SE o serviço não inicia:
+  - Verificar se Python está instalado: python --version
+  - Verificar se .venv está criado: ls .venv
+  - Recriar venv: python -m venv .venv && .venv\Scripts\activate && pip install -r requirements.txt
+
+SE o botão "Imprimir" não faz nada:
+  - Abrir console F12 na aba "Console"
+  - Procurar por mensagens com [PRINT] ou erros
+  - Copiar a mensagem de erro e enviar
+
+SE a impressora não imprime mas recebe ok:
+  - Verificar se impressora ELGIN i9(USB) está conectada
+  - Abrir Gerenciador de Dispositivos (Win+X → M)
+  - Procurar por "ELGIN" em "Impressoras"
+  - Se não aparecer, plugar novamente a USB
+
+SE aparece "mixed content" ou "insecure request":
+  - Isso significa o navegador está bloqueando HTTP de HTTPS
+  - O serviço local (127.0.0.1:8765) precisa estar rodando
+  - Certifique-se: npm run printer:service está ativo em outro terminal
+
+RESUMO DO FLUXO CORRETO
+=======================
+Terminal 1: npm run printer:service (deixa rodando)
+Terminal 2: npm run dev (ou acesso ao link Vercel)
+Browser:   F12 (console aberta)
+           Fechar mesa → click "Imprimir cupom" → papel sai
+
+Se tudo passos 1-3 funcionaram, o sistema está OK!
