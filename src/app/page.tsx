@@ -206,7 +206,6 @@ function HomePageContent() {
   }
 
   function openPreview(item: MenuItem) {
-    if (!item.addons || item.addons.length === 0) return;
     setPreviewItem(item);
   }
 
@@ -216,8 +215,16 @@ function HomePageContent() {
 
   function addFromPreview() {
     if (!previewItem) return;
+    const hasAddons = Boolean(previewItem.addons && previewItem.addons.length > 0);
+
+    if (hasAddons) {
+      setPreviewItem(null);
+      openAddonModal(previewItem);
+      return;
+    }
+
+    upsertLine(previewItem, [], "");
     setPreviewItem(null);
-    openAddonModal(previewItem);
   }
 
   function toggleAddon(addon: Addon) {
@@ -505,8 +512,7 @@ function HomePageContent() {
                     <button
                       type="button"
                       onClick={() => openPreview(item)}
-                      disabled={!item.addons || item.addons.length === 0}
-                      className="block w-full disabled:cursor-default"
+                      className="block w-full"
                     >
                       <img
                         src={item.imageUrl}
