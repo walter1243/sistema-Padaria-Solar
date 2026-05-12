@@ -356,7 +356,11 @@ export default function AdminPage() {
 
     const widthMedia = window.matchMedia("(min-width: 768px)");
     const pointerMedia = window.matchMedia("(hover: hover) and (pointer: fine)");
-    const update = () => setIsDesktopPrintEnabled(widthMedia.matches || pointerMedia.matches);
+    const update = () => {
+      const enabled = widthMedia.matches || pointerMedia.matches;
+      console.log("[DESKTOP_PRINT_DEBUG] widthMatch:", widthMedia.matches, "pointerMatch:", pointerMedia.matches, "enabled:", enabled);
+      setIsDesktopPrintEnabled(enabled);
+    };
     update();
 
     widthMedia.addEventListener("change", update);
@@ -465,6 +469,7 @@ export default function AdminPage() {
   }
 
   async function handlePrintReceipt(receipt: TableReceipt) {
+    console.log("[HANDLE] isDesktopPrintEnabled:", isDesktopPrintEnabled);
     setLastPrintedReceipt(receipt);
     if (typeof window !== "undefined") {
       window.localStorage.setItem(LAST_RECEIPT_STORAGE_KEY, JSON.stringify(receipt));
@@ -472,6 +477,7 @@ export default function AdminPage() {
 
     if (!isDesktopPrintEnabled) {
       setError("Impressão desabilitada neste dispositivo (apenas desktop/tablet com impressora).");
+      console.log("[HANDLE] Impressão desabilitada. Verifique media queries no console: [DESKTOP_PRINT_DEBUG]");
       return;
     }
 
