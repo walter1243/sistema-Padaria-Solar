@@ -7,6 +7,7 @@ import {
   integer,
   boolean,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
@@ -51,6 +52,24 @@ export const orders = pgTable("orders", {
   status: varchar("status", { length: 20 }).notNull().default("novo"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+export const tableSessions = pgTable(
+  "table_sessions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tableId: varchar("table_id", { length: 50 }).notNull(),
+    sessionId: varchar("session_id", { length: 100 }).notNull(),
+    status: varchar("status", { length: 20 }).notNull().default("active"),
+    openedAt: timestamp("opened_at").defaultNow().notNull(),
+    closedAt: timestamp("closed_at"),
+  },
+  (table) => ({
+    tableSessionUnique: uniqueIndex("table_sessions_table_session_unique").on(
+      table.tableId,
+      table.sessionId,
+    ),
+  }),
+);
 
 // ─── Order Items ──────────────────────────────────────────────────────────────
 export const orderItems = pgTable("order_items", {
@@ -97,6 +116,8 @@ export const addonsRelations = relations(addons, ({ one }) => ({
 export const ordersRelations = relations(orders, ({ many }) => ({
   items: many(orderItems),
 }));
+
+export const tableSessionsRelations = relations(tableSessions, () => ({}));
 
 export const orderItemsRelations = relations(orderItems, ({ one }) => ({
   order: one(orders, {

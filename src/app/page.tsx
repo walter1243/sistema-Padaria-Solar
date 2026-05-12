@@ -84,6 +84,15 @@ function HomePageContent() {
     setTableSessionId(nextSession);
   }, [tableId]);
 
+  function renewTableSession() {
+    if (!tableId) return "";
+    const storageKey = `padaria:table-session:${tableId}`;
+    const nextSession = crypto.randomUUID();
+    sessionStorage.setItem(storageKey, nextSession);
+    setTableSessionId(nextSession);
+    return nextSession;
+  }
+
   useEffect(() => {
     const timer = setInterval(() => {
       loadMenu();
@@ -104,6 +113,9 @@ function HomePageContent() {
 
       const allOrders = (await res.json()) as Order[];
       const filtered = allOrders.filter((order) => {
+        if (tableId && tableSessionId) {
+          return order.tableId === tableId && order.sessionId === tableSessionId;
+        }
         if (tableId && order.tableId === tableId) return true;
         return customerName.trim().length > 0 && order.customerName.toLowerCase() === customerName.trim().toLowerCase();
       });
@@ -114,7 +126,7 @@ function HomePageContent() {
     loadCustomerOrders();
     const timer = setInterval(loadCustomerOrders, 4000);
     return () => clearInterval(timer);
-  }, [tableId, customerName]);
+  }, [tableId, customerName, tableSessionId]);
 
   const filteredMenu = useMemo(() => {
     return menu.filter((item) => {
@@ -347,6 +359,11 @@ function HomePageContent() {
 
       if (!res.ok) {
         const payload = (await res.json().catch(() => ({}))) as { error?: string };
+        if (res.status === 409 && payload.error?.includes("encerrada")) {
+          renewTableSession();
+          setMessage("A sessao antiga desta mesa foi encerrada. O QR foi renovado neste aparelho; envie o pedido novamente.");
+          return;
+        }
         setMessage(payload.error || "Nao foi possivel enviar o pedido.");
         return;
       }

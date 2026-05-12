@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { closeTableWithPayment } from "@/lib/store";
+import { closeTableWithPaymentInDb } from "@/lib/db/orders";
 import { PaymentMethod } from "@/lib/types";
 
 function isAdminCookieValid(cookieValue: string | undefined) {
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Dados invalidos para fechamento da mesa." }, { status: 400 });
   }
 
-  const result = closeTableWithPayment(tableId, method);
+  const result = await closeTableWithPaymentInDb(tableId, method);
 
   if (result.closedOrders === 0) {
     return NextResponse.json({ error: "Mesa sem pedidos ativos para fechamento." }, { status: 409 });

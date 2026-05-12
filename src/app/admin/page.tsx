@@ -17,6 +17,13 @@ type ReportsSummary = {
   payments: PaymentRecord[];
 };
 
+type TableSummary = {
+  tableId: string;
+  total: number;
+  count: number;
+  orders: Order[];
+};
+
 type ProductDraft = {
   name: string;
   description: string;
@@ -78,6 +85,7 @@ export default function AdminPage() {
   const [kitchenUser, setKitchenUser] = useState("");
   const [kitchenPass, setKitchenPass] = useState("");
   const [reports, setReports] = useState<ReportsSummary | null>(null);
+  const [tableSummaries, setTableSummaries] = useState<TableSummary[]>([]);
   const [showProductForm, setShowProductForm] = useState(false);
   const [showKitchenAuthEditor, setShowKitchenAuthEditor] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -94,12 +102,13 @@ export default function AdminPage() {
   const [closePaymentMethod, setClosePaymentMethod] = useState<PaymentMethod>("dinheiro");
 
   async function loadData() {
-    const [menuRes, ordersRes, categoriesRes, bakerRes, reportsRes] = await Promise.all([
+    const [menuRes, ordersRes, categoriesRes, bakerRes, reportsRes, tablesRes] = await Promise.all([
       fetch("/api/menu", { cache: "no-store" }),
       fetch("/api/orders", { cache: "no-store" }),
       fetch("/api/categories", { cache: "no-store" }),
       fetch("/api/baker/credentials", { cache: "no-store" }),
       fetch("/api/reports/summary", { cache: "no-store" }),
+      fetch("/api/tables/active", { cache: "no-store" }),
     ]);
 
     const menuData = (await menuRes.json()) as MenuItem[];
@@ -120,6 +129,11 @@ export default function AdminPage() {
     if (reportsRes.ok) {
       const reportData = (await reportsRes.json()) as ReportsSummary;
       setReports(reportData);
+    }
+
+    if (tablesRes.ok) {
+      const tablesData = (await tablesRes.json()) as TableSummary[];
+      setTableSummaries(tablesData);
     }
   }
 
@@ -157,24 +171,6 @@ export default function AdminPage() {
       loadData();
     }
   }, [authorized, refreshTick]);
-
-  const tableSummaries = useMemo(() => {
-    const activeOrders = orders.filter((order) => order.status !== "entregue");
-    const map: Record<string, { tableId: string; total: number; count: number; orders: Order[] }> = {};
-
-    activeOrders.forEach((order) => {
-      const tableId = getOrderTableId(order);
-      if (!map[tableId]) {
-        map[tableId] = { tableId, total: 0, count: 0, orders: [] };
-      }
-
-      map[tableId].total += order.total;
-      map[tableId].count += 1;
-      map[tableId].orders.push(order);
-    });
-
-    return Object.values(map).sort((a, b) => a.tableId.localeCompare(b.tableId, "pt-BR", { numeric: true }));
-  }, [orders]);
 
   const dashboardMetrics = useMemo(() => {
     const deliveredOrders = orders.filter((order) => order.status === "entregue");

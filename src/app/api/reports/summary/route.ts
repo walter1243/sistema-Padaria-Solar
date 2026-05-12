@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { listPayments } from "@/lib/store";
+import { listPaymentsFromDb } from "@/lib/db/orders";
 
 function isAdminCookieValid(cookieValue: string | undefined) {
   const expected = process.env.ADMIN_SESSION_TOKEN || "padaria_admin_token_dev";
@@ -15,7 +15,7 @@ export async function GET() {
     return NextResponse.json({ error: "Nao autorizado." }, { status: 401 });
   }
 
-  const payments = listPayments();
+  const payments = await listPaymentsFromDb();
   const totalsByMethod = {
     dinheiro: payments.filter((item) => item.method === "dinheiro").reduce((acc, item) => acc + item.amount, 0),
     pix: payments.filter((item) => item.method === "pix").reduce((acc, item) => acc + item.amount, 0),

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { updateOrderStatus } from "@/lib/store";
+import { updateOrderStatusInDb } from "@/lib/db/orders";
 import { OrderStatus } from "@/lib/types";
 
 type Params = { params: Promise<{ id: string }> };
@@ -15,7 +15,7 @@ export async function PATCH(request: Request, { params }: Params) {
     return NextResponse.json({ error: "Status invalido." }, { status: 400 });
   }
 
-  const updated = updateOrderStatus(id, status);
+  const updated = await updateOrderStatusInDb(id, status);
 
   if (!updated) {
     return NextResponse.json({ error: "Pedido nao encontrado." }, { status: 404 });

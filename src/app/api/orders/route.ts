@@ -1,8 +1,5 @@
 import { NextResponse } from "next/server";
-import { addOrder, listOrders, validateTableSession } from "@/lib/store";
-import { db } from "@/lib/db";
-import { orders, orderItems, products } from "@/lib/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { createOrderInDb, listOrdersFromDb, validateTableSessionInDb } from "@/lib/db/orders";
 
 type RawOrderItem = {
   itemId?: unknown;
@@ -12,7 +9,7 @@ type RawOrderItem = {
 };
 
 export async function GET() {
-  return NextResponse.json(listOrders());
+  return NextResponse.json(await listOrdersFromDb());
 }
 
 export async function POST(request: Request) {
@@ -37,7 +34,7 @@ export async function POST(request: Request) {
 
   const total = safeItems.reduce((acc, item) => acc + item.price * item.quantity, 0);
 
-  const sessionValidation = validateTableSession(tableId, sessionId);
+  const sessionValidation = await validateTableSessionInDb(tableId, sessionId);
   if (!sessionValidation.allowed) {
     if (sessionValidation.reason === "missing-session") {
       return NextResponse.json({ error: "Sessao da mesa invalida. Reabra o cardapio pelo QR Code." }, { status: 400 });
@@ -48,41 +45,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Mesa em uso por outra sessao." }, { status: 409 });
   }
 
-  // Persiste o pedido no banco e reduz estoque
-  const [newOrder] = await db
-    .insert(orders)
-    .values({
-      tableId: tableId || null,
-      sessionId: sessionId || null,
-      customerName,
-      notes: notes || null,
-      total: String(total),
-      status: "novo",
-    })
-    .returning();
-
-  await db.insert(orderItems).values(
-    safeItems.map((item) => ({
-      orderId: newOrder.id,
-      productId: item.itemId || null,
-      name: item.name,
-      price: String(item.price),
-      quantity: item.quantity,
-    }))
-  );
-
-  // Reduz estoque de cada produto vendido
-  await Promise.all(
-    safeItems.map((item) =>
-      db
-        .update(products)
-        .set({ stock: sql`GREATEST(${products.stock} - ${item.quantity}, 0)` })
-        .where(eq(products.id, item.itemId))
-    )
-  );
-
-  // Mantém também na store em memória para compatibilidade com cozinha/admin
-  const created = addOrder({
+  const created = await createOrderInDb({
     tableId,
     sessionId,
     customerName,
@@ -91,5 +54,5 @@ export async function POST(request: Request) {
     total,
   });
 
-  return NextResponse.json({ ...created, dbId: newOrder.id }, { status: 201 });
+  return NextResponse.json(created, { status: 201 });
 }
