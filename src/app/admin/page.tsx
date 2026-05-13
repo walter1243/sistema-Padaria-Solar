@@ -186,6 +186,76 @@ function buildReceiptHtml(receipt: TableReceipt) {
 </html>`;
 }
 
+function buildDailyReportHtml(input: {
+  dateLabel: string;
+  totalPaid: number;
+  cash: number;
+  pix: number;
+  card: number;
+  paymentsCount: number;
+}) {
+  return `<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fechamento Diario - ${input.dateLabel}</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        font-family: Arial, Helvetica, sans-serif;
+        margin: 24px;
+        color: #111;
+      }
+      .wrap {
+        max-width: 420px;
+        border: 1px solid #ddd;
+        border-radius: 12px;
+        padding: 16px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 22px;
+      }
+      .muted {
+        color: #555;
+        margin-top: 4px;
+        font-size: 13px;
+      }
+      .row {
+        display: flex;
+        justify-content: space-between;
+        padding: 8px 0;
+        border-bottom: 1px dashed #ddd;
+        font-size: 15px;
+      }
+      .row strong {
+        font-size: 16px;
+      }
+      .footer {
+        margin-top: 12px;
+        font-size: 12px;
+        color: #666;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Padaria Solar</h1>
+      <p class="muted">Fechamento de caixa diario</p>
+      <p class="muted">Data: ${input.dateLabel}</p>
+
+      <div class="row"><span>Total do dia</span><strong>${currency(input.totalPaid)}</strong></div>
+      <div class="row"><span>Dinheiro</span><strong>${currency(input.cash)}</strong></div>
+      <div class="row"><span>Pix</span><strong>${currency(input.pix)}</strong></div>
+      <div class="row"><span>Cartao</span><strong>${currency(input.card)}</strong></div>
+      <div class="row"><span>Fechamentos</span><strong>${input.paymentsCount}</strong></div>
+
+      <p class="footer">Documento gerado pelo painel administrativo.</p>
+    </div>
+  </body>
+</html>`;
+}
+
 function statusLabel(status: OrderStatus) {
   const map: Record<OrderStatus, string> = {
     novo: "Novo",
@@ -393,6 +463,36 @@ export default function AdminPage() {
     return tableSummaries.find((table) => table.tableId === selectedTableId) || null;
   }, [selectedTableId, tableSummaries]);
 
+  const dailyReport = useMemo(() => {
+    const payments = reports?.payments || [];
+    const now = new Date();
+    const sameDayPayments = payments.filter((payment) => {
+      const closedAt = new Date(payment.closedAt);
+      return (
+        closedAt.getDate() === now.getDate() &&
+        closedAt.getMonth() === now.getMonth() &&
+        closedAt.getFullYear() === now.getFullYear()
+      );
+    });
+
+    const totals = sameDayPayments.reduce(
+      (acc, payment) => {
+        acc.total += payment.amount;
+        if (payment.method === "dinheiro") acc.cash += payment.amount;
+        if (payment.method === "pix") acc.pix += payment.amount;
+        if (payment.method === "cartao") acc.card += payment.amount;
+        return acc;
+      },
+      { total: 0, cash: 0, pix: 0, card: 0 },
+    );
+
+    return {
+      dateLabel: now.toLocaleDateString("pt-BR"),
+      paymentsCount: sameDayPayments.length,
+      ...totals,
+    };
+  }, [reports]);
+
   function printReceipt(receipt: TableReceipt) {
     if (typeof window === "undefined") return;
 
@@ -410,6 +510,77 @@ export default function AdminPage() {
       printWindow.focus();
       printWindow.print();
     };
+  }
+
+  async function printDailyCashSummary() {
+    setError("");
+    setIsPrinting(true);
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      const response = await fetch(`${THERMAL_BRIDGE_URL}/print-daily-summary`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dateLabel: dailyReport.dateLabel,
+          totalPaid: dailyReport.total,
+          cash: dailyReport.cash,
+          pix: dailyReport.pix,
+          card: dailyReport.card,
+          paymentsCount: dailyReport.paymentsCount,
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(payload.error || "Falha ao imprimir fechamento diario.");
+      }
+
+      setFormNotice("Fechamento diario enviado para impressao termica.");
+    } catch (e) {
+      if ((e as Error).name === "AbortError") {
+        setError("Timeout: serviço local não respondeu. Verifique se 'npm run printer:service' está rodando.");
+      } else {
+        setError((e as Error).message || "Nao foi possivel imprimir fechamento diario.");
+      }
+    } finally {
+      setIsPrinting(false);
+    }
+  }
+
+  async function reprintDailyCashSummary() {
+    setError("");
+    setIsPrinting(true);
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      const response = await fetch(`${THERMAL_BRIDGE_URL}/reprint-last-daily-summary`, {
+        method: "POST",
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(payload.error || "Falha ao reimprimir fechamento diario.");
+      }
+
+      setFormNotice("Reimpressao do fechamento diario enviada para impressao termica.");
+    } catch (e) {
+      if ((e as Error).name === "AbortError") {
+        setError("Timeout: serviço local não respondeu. Verifique se 'npm run printer:service' está rodando.");
+      } else {
+        setError((e as Error).message || "Nao foi possivel reimprimir fechamento diario.");
+      }
+    } finally {
+      setIsPrinting(false);
+    }
   }
 
   async function printWithThermalBridge(receipt: TableReceipt) {
@@ -1651,6 +1822,33 @@ export default function AdminPage() {
 
             {activeSection === "reports" && (
               <section className="space-y-4">
+                <div className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">Fechamento diario</p>
+                      <p className="mt-1 text-sm text-[#b2c5e2]">
+                        {dailyReport.dateLabel} - Dinheiro: {currency(dailyReport.cash)} | Pix: {currency(dailyReport.pix)} | Cartao: {currency(dailyReport.card)}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void printDailyCashSummary()}
+                      disabled={isPrinting}
+                      className="rounded-lg bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] px-4 py-2 text-sm font-bold text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isPrinting ? "Imprimindo fechamento..." : "Imprimir fechamento diario"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void reprintDailyCashSummary()}
+                      disabled={isPrinting}
+                      className="rounded-lg border border-[#365682] bg-[#13233f] px-4 py-2 text-sm font-bold text-[#d9e7ff] disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isPrinting ? "Reimprimindo..." : "Reimprimir ultimo fechamento"}
+                    </button>
+                  </div>
+                </div>
+
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                   <article className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
                     <p className="text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">Total pago</p>

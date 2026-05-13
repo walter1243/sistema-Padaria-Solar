@@ -47,6 +47,7 @@ function HomePageContent() {
   const [tableId, setTableId] = useState("");
   const [tableSessionId, setTableSessionId] = useState("");
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
+  const [sessionBlocked, setSessionBlocked] = useState(false);
 
   const [addonModalItem, setAddonModalItem] = useState<MenuItem | null>(null);
   const [addonDraft, setAddonDraft] = useState<Addon[]>([]);
@@ -94,6 +95,25 @@ function HomePageContent() {
     return nextSession;
   }
 
+  function handleClosedSessionFlow() {
+    if (sessionBlocked) return;
+
+    setSessionBlocked(true);
+    setShowCart(false);
+    setCartStep("items");
+    setCartLines([]);
+    setCustomerOrders([]);
+    setMessage("Obrigado e volte sempre! Esta conta foi encerrada. Escaneie o QR Code novamente para um novo pedido.");
+
+    const storageKey = tableId ? `padaria:table-session:${tableId}` : "";
+    window.setTimeout(() => {
+      if (storageKey) {
+        sessionStorage.removeItem(storageKey);
+      }
+      window.location.replace("/");
+    }, 2600);
+  }
+
   useEffect(() => {
     const timer = setInterval(() => {
       loadMenu();
@@ -128,6 +148,34 @@ function HomePageContent() {
     const timer = setInterval(loadCustomerOrders, 4000);
     return () => clearInterval(timer);
   }, [tableId, customerName, tableSessionId]);
+
+  useEffect(() => {
+    if (!tableId || !tableSessionId || sessionBlocked) return;
+
+    async function checkSessionStatus() {
+      try {
+        const res = await fetch(
+          `/api/tables/session?tableId=${encodeURIComponent(tableId)}&sessionId=${encodeURIComponent(tableSessionId)}`,
+          { cache: "no-store" },
+        );
+
+        if (!res.ok) return;
+        const payload = (await res.json()) as { status?: string };
+        if (payload.status === "closed" || payload.status === "replaced") {
+          handleClosedSessionFlow();
+        }
+      } catch {
+        // Keep silent to avoid UX noise when offline/intermittent.
+      }
+    }
+
+    void checkSessionStatus();
+    const timer = setInterval(() => {
+      void checkSessionStatus();
+    }, 3000);
+
+    return () => clearInterval(timer);
+  }, [tableId, tableSessionId, sessionBlocked]);
 
   const filteredMenu = useMemo(() => {
     return menu.filter((item) => {
@@ -328,6 +376,12 @@ function HomePageContent() {
 
   async function submitOrder() {
     setMessage("");
+
+    if (sessionBlocked) {
+      setMessage("Conta encerrada. Escaneie o QR Code novamente para fazer um novo pedido.");
+      return;
+    }
+
     if (cartLines.length === 0) {
       setMessage("Adicione pelo menos um item no pedido.");
       return;
@@ -381,10 +435,9 @@ function HomePageContent() {
       });
 
       if (!res.ok) {
-        const payload = (await res.json().catch(() => ({}))) as { error?: string };
-        if (res.status === 409 && payload.error?.includes("encerrada")) {
-          renewTableSession();
-          setMessage("A sessao antiga desta mesa foi encerrada. O QR foi renovado neste aparelho; envie o pedido novamente.");
+        const payload = (await res.json().catch(() => ({}))) as { error?: string; sessionClosed?: boolean };
+        if (res.status === 410 || payload.sessionClosed || payload.error?.includes("encerrada")) {
+          handleClosedSessionFlow();
           return;
         }
         setMessage(payload.error || "Nao foi possivel enviar o pedido.");
@@ -916,10 +969,10 @@ function HomePageContent() {
                     </button>
                     <button
                       onClick={submitOrder}
-                      disabled={loading}
+                      disabled={loading || sessionBlocked}
                       className="flex-1 rounded-lg bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] px-4 py-3 font-bold text-white transition hover:brightness-95 disabled:opacity-50"
                     >
-                      {loading ? "Enviando..." : "Enviar para cozinha"}
+                      {sessionBlocked ? "Conta encerrada" : loading ? "Enviando..." : "Enviar para cozinha"}
                     </button>
                   </div>
                 )}

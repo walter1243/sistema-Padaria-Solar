@@ -8,6 +8,8 @@ Endpoints:
 - GET  /health
 - POST /print-receipt
 - POST /reprint-last
+- POST /print-daily-summary
+- POST /reprint-last-daily-summary
 """
 
 from __future__ import annotations
@@ -39,6 +41,7 @@ WINDOWS_PRINTER_CANDIDATES = [
 ]
 
 LAST_RECEIPT: dict[str, Any] | None = None
+LAST_DAILY_SUMMARY: dict[str, Any] | None = None
 
 
 def _parse_usb_candidates(raw: str) -> list[tuple[int, int]]:
@@ -227,6 +230,46 @@ def _print_receipt(receipt: dict[str, Any]) -> None:
     print("[_print_receipt] ✓ Impressão concluída com sucesso!")
 
 
+def _print_daily_summary(summary: dict[str, Any]) -> None:
+    print("[_print_daily_summary] Iniciando impressão...")
+    printer = _connect_printer()
+    printer._raw(b"\x1b\x40")
+    printer.set(align="left", font="a", width=1, height=1, bold=True)
+
+    date_label = _safe_text(summary.get("dateLabel", "")) or datetime.now().strftime("%d/%m/%Y")
+    total_paid = float(summary.get("totalPaid", 0))
+    cash = float(summary.get("cash", 0))
+    pix = float(summary.get("pix", 0))
+    card = float(summary.get("card", 0))
+    payments_count = int(summary.get("paymentsCount", 0))
+
+    printed_at = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+
+    printer.set(align="center", font="a", width=2, height=2, bold=True)
+    printer.text("PADARIA SOLAR\n")
+    printer.set(align="center", font="a", width=1, height=1, bold=True)
+    printer.text("FECHAMENTO DIARIO\n")
+    printer.text("=" * 42 + "\n")
+
+    printer.set(align="left", font="a", bold=True)
+    printer.text(f"DATA: {date_label}\n")
+    printer.text("-" * 42 + "\n")
+    printer.text(f"TOTAL DO DIA: {_money(total_paid)}\n")
+    printer.text(f"DINHEIRO:    {_money(cash)}\n")
+    printer.text(f"PIX:         {_money(pix)}\n")
+    printer.text(f"CARTAO:      {_money(card)}\n")
+    printer.text(f"FECHAMENTOS: {payments_count}\n")
+    printer.text("-" * 42 + "\n")
+    printer.set(align="right", font="a", bold=True)
+    printer.text(f"IMPRESSO: {printed_at}\n")
+
+    printer.text("\n")
+    print("[_print_daily_summary] Executando cut()...")
+    printer.cut()
+    printer.close()
+    print("[_print_daily_summary] ✓ Impressão concluída com sucesso!")
+
+
 class PrinterHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self) -> None:  # noqa: N802
         _respond(self, 204, {})
@@ -244,6 +287,7 @@ class PrinterHandler(BaseHTTPRequestHandler):
                     "usbCandidates": [f"{hex(v)}:{hex(p)}" for v, p in USB_DEVICE_CANDIDATES],
                     "windowsPrinterName": WINDOWS_PRINTER_NAME or None,
                     "hasLastReceipt": LAST_RECEIPT is not None,
+                    "hasLastDailySummary": LAST_DAILY_SUMMARY is not None,
                 },
             )
             return
@@ -251,9 +295,14 @@ class PrinterHandler(BaseHTTPRequestHandler):
         _respond(self, 404, {"ok": False, "error": "Not found"})
 
     def do_POST(self) -> None:  # noqa: N802
-        global LAST_RECEIPT
+        global LAST_RECEIPT, LAST_DAILY_SUMMARY
 
-        if self.path not in ("/print-receipt", "/reprint-last"):
+        if self.path not in (
+            "/print-receipt",
+            "/reprint-last",
+            "/print-daily-summary",
+            "/reprint-last-daily-summary",
+        ):
             _respond(self, 404, {"ok": False, "error": "Not found"})
             return
 
@@ -264,6 +313,18 @@ class PrinterHandler(BaseHTTPRequestHandler):
             try:
                 _print_receipt(LAST_RECEIPT)
                 _respond(self, 200, {"ok": True, "mode": "reprint-last"})
+                return
+            except Exception as exc:  # pylint: disable=broad-except
+                _respond(self, 500, {"ok": False, "error": str(exc)})
+                return
+
+        if self.path == "/reprint-last-daily-summary":
+            if LAST_DAILY_SUMMARY is None:
+                _respond(self, 404, {"ok": False, "error": "No last daily summary to reprint"})
+                return
+            try:
+                _print_daily_summary(LAST_DAILY_SUMMARY)
+                _respond(self, 200, {"ok": True, "mode": "reprint-last-daily-summary"})
                 return
             except Exception as exc:  # pylint: disable=broad-except
                 _respond(self, 500, {"ok": False, "error": str(exc)})
@@ -281,6 +342,12 @@ class PrinterHandler(BaseHTTPRequestHandler):
             return
 
         try:
+            if self.path == "/print-daily-summary":
+                _print_daily_summary(payload)
+                LAST_DAILY_SUMMARY = payload
+                _respond(self, 200, {"ok": True, "mode": "print-daily-summary"})
+                return
+
             _print_receipt(payload)
             LAST_RECEIPT = payload
             _respond(self, 200, {"ok": True, "mode": "print-receipt"})

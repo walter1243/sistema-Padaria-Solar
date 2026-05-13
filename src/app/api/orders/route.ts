@@ -40,7 +40,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Sessao da mesa invalida. Reabra o cardapio pelo QR Code." }, { status: 400 });
     }
     if (sessionValidation.reason === "session-closed") {
-      return NextResponse.json({ error: "Esta sessao ja foi encerrada. Escaneie o QR Code novamente." }, { status: 409 });
+      return NextResponse.json({ error: "Esta sessao ja foi encerrada. Escaneie o QR Code novamente.", sessionClosed: true }, { status: 410 });
     }
     return NextResponse.json({ error: "Mesa em uso por outra sessao." }, { status: 409 });
   }
