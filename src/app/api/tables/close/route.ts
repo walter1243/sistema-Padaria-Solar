@@ -1,14 +1,11 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { closeTableWithPaymentInDb } from "@/lib/db/orders";
-import { PaymentMethod } from "@/lib/types";
+import { releaseTableInDb } from "@/lib/db/orders";
 
 function isAdminCookieValid(cookieValue: string | undefined) {
   const expected = process.env.ADMIN_SESSION_TOKEN || "padaria_admin_token_dev";
   return Boolean(cookieValue && cookieValue === expected);
 }
-
-const validMethods: PaymentMethod[] = ["dinheiro", "pix", "cartao"];
 
 export async function POST(request: Request) {
   const cookieStore = await cookies();
@@ -20,17 +17,11 @@ export async function POST(request: Request) {
 
   const body = await request.json();
   const tableId = String(body.tableId ?? "").trim();
-  const method = String(body.method ?? "") as PaymentMethod;
 
-  if (!tableId || !validMethods.includes(method)) {
-    return NextResponse.json({ error: "Dados invalidos para fechamento da mesa." }, { status: 400 });
+  if (!tableId) {
+    return NextResponse.json({ error: "Dados invalidos para liberar a mesa." }, { status: 400 });
   }
 
-  const result = await closeTableWithPaymentInDb(tableId, method);
-
-  if (result.closedOrders === 0) {
-    return NextResponse.json({ error: "Mesa sem pedidos ativos para fechamento." }, { status: 409 });
-  }
-
+  const result = await releaseTableInDb(tableId);
   return NextResponse.json(result);
 }

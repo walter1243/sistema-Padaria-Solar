@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { orderItems, orders, payments, products, tableSessions } from "@/lib/db/schema";
-import { Order, OrderItem, OrderStatus, PaymentMethod, PaymentRecord, ReceiptLineItem, TableReceipt } from "@/lib/types";
+import { orderItems, orders, products, tableSessions } from "@/lib/db/schema";
+import { Order, OrderItem, OrderStatus } from "@/lib/types";
 
 export type TableSessionValidation = {
   allowed: boolean;
@@ -10,7 +10,6 @@ export type TableSessionValidation = {
 
 export type ActiveTableSummary = {
   tableId: string;
-  total: number;
   count: number;
   orders: Order[];
 };
@@ -177,104 +176,40 @@ export async function updateOrderStatusInDb(id: string, status: OrderStatus): Pr
   };
 }
 
-export async function closeTableWithPaymentInDb(tableId: string, method: PaymentMethod) {
+export async function releaseTableInDb(tableId: string): Promise<{ closedOrders: number }> {
   const normalizedTableId = tableId.trim();
   const activeSession = await db.query.tableSessions.findFirst({
     where: and(eq(tableSessions.tableId, normalizedTableId), eq(tableSessions.status, "active")),
   });
 
   if (!activeSession) {
-    return { closedOrders: 0, total: 0, payment: null as PaymentRecord | null, receipt: null as TableReceipt | null };
+    return { closedOrders: 0 };
   }
 
-  const activeOrders = await db
+  const pendingOrders = await db
     .select()
     .from(orders)
-    .where(and(eq(orders.tableId, normalizedTableId), eq(orders.sessionId, activeSession.sessionId)));
+    .where(
+      and(
+        eq(orders.tableId, normalizedTableId),
+        eq(orders.sessionId, activeSession.sessionId),
+        ne(orders.status, "entregue"),
+      ),
+    );
 
-  const total = activeOrders.reduce((acc, order) => acc + Number(order.total), 0);
-
-  if (activeOrders.length === 0 || total <= 0) {
+  if (pendingOrders.length > 0) {
     await db
-      .update(tableSessions)
-      .set({ status: "closed", closedAt: new Date() })
-      .where(eq(tableSessions.id, activeSession.id));
-    return { closedOrders: 0, total: 0, payment: null as PaymentRecord | null, receipt: null as TableReceipt | null };
+      .update(orders)
+      .set({ status: "entregue" })
+      .where(inArray(orders.id, pendingOrders.map((o) => o.id)));
   }
-
-  const activeOrderIds = activeOrders.map((order) => order.id);
-  const consumedItems = await db.select().from(orderItems).where(inArray(orderItems.orderId, activeOrderIds));
-
-  const aggregated = new Map<string, ReceiptLineItem>();
-  for (const item of consumedItems) {
-    const unitPrice = Number(item.price);
-    const key = `${item.name}::${unitPrice.toFixed(2)}`;
-    const current = aggregated.get(key);
-    if (current) {
-      current.quantity += item.quantity;
-      current.total += unitPrice * item.quantity;
-      continue;
-    }
-
-    aggregated.set(key, {
-      description: item.name,
-      quantity: item.quantity,
-      unitPrice,
-      total: unitPrice * item.quantity,
-    });
-  }
-
-  const lines = Array.from(aggregated.values()).sort((a, b) => a.description.localeCompare(b.description, "pt-BR"));
-
-  await db.update(orders).set({ status: "entregue" }).where(inArray(orders.id, activeOrderIds));
-
-  const [payment] = await db
-    .insert(payments)
-    .values({
-      tableId: normalizedTableId,
-      amount: String(total),
-      method,
-    })
-    .returning();
 
   await db
     .update(tableSessions)
     .set({ status: "closed", closedAt: new Date() })
     .where(eq(tableSessions.id, activeSession.id));
 
-  const receipt: TableReceipt = {
-    tableId: normalizedTableId,
-    sessionId: activeSession.sessionId,
-    method,
-    total,
-    closedAt: toIsoString(payment.closedAt),
-    orderCount: activeOrders.length,
-    lines,
-  };
-
-  return {
-    closedOrders: activeOrders.length,
-    total,
-    payment: {
-      id: payment.id,
-      tableId: payment.tableId,
-      amount: Number(payment.amount),
-      method: payment.method as PaymentMethod,
-      closedAt: toIsoString(payment.closedAt),
-    },
-    receipt,
-  };
-}
-
-export async function listPaymentsFromDb(): Promise<PaymentRecord[]> {
-  const rows = await db.select().from(payments).orderBy(desc(payments.closedAt));
-  return rows.map((payment) => ({
-    id: payment.id,
-    tableId: payment.tableId,
-    amount: Number(payment.amount),
-    method: payment.method as PaymentMethod,
-    closedAt: toIsoString(payment.closedAt),
-  }));
+  return { closedOrders: pendingOrders.length };
 }
 
 export async function listActiveTableSummariesFromDb(): Promise<ActiveTableSummary[]> {
@@ -301,7 +236,6 @@ export async function listActiveTableSummariesFromDb(): Promise<ActiveTableSumma
 
       return {
         tableId: session.tableId,
-        total: sessionOrders.reduce((acc, order) => acc + order.total, 0),
         count: sessionOrders.length,
         orders: sessionOrders,
       };
