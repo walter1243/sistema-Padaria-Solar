@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Addon,
   MenuCategory,
@@ -102,6 +102,8 @@ export default function AdminPage() {
   const [orderStatusFilter, setOrderStatusFilter] = useState<OrderStatus | "">("");
   const [orderTableFilter, setOrderTableFilter] = useState("");
 
+  const imageFileRef = useRef<HTMLInputElement>(null);
+
   async function loadData() {
     const [menuRes, ordersRes, categoriesRes, bakerRes, adminRes, tablesRes] = await Promise.all([
       fetch("/api/menu", { cache: "no-store" }),
@@ -170,13 +172,20 @@ export default function AdminPage() {
     }
   }, [authorized, refreshTick]);
 
+  const todayOrders = useMemo(() => {
+    const todayStr = new Date().toLocaleDateString("pt-BR");
+    return orders.filter(
+      (order) => new Date(order.createdAt).toLocaleDateString("pt-BR") === todayStr,
+    );
+  }, [orders]);
+
   const dashboardMetrics = useMemo(() => {
     return {
       totalProducts: menu.length,
       activeTables: tableSummaries.length,
-      openOrders: orders.filter((order) => order.status !== "entregue").length,
+      openOrders: todayOrders.filter((order) => order.status !== "entregue").length,
     };
-  }, [menu.length, orders, tableSummaries.length]);
+  }, [menu.length, todayOrders, tableSummaries.length]);
 
   const selectedTableSummary = useMemo(() => {
     if (!selectedTableId) return null;
@@ -184,13 +193,13 @@ export default function AdminPage() {
   }, [selectedTableId, tableSummaries]);
 
   const filteredOrders = useMemo(() => {
-    return orders.filter((order) => {
+    return todayOrders.filter((order) => {
       const matchesStatus = orderStatusFilter === "" || order.status === orderStatusFilter;
       const tableId = getOrderTableId(order);
       const matchesTable = orderTableFilter === "" || tableId === orderTableFilter;
       return matchesStatus && matchesTable;
     });
-  }, [orders, orderStatusFilter, orderTableFilter]);
+  }, [todayOrders, orderStatusFilter, orderTableFilter]);
 
   async function login(e: FormEvent) {
     e.preventDefault();
@@ -274,6 +283,14 @@ export default function AdminPage() {
     e.preventDefault();
     e.stopPropagation();
   };
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file && file.type.startsWith("image/")) {
+      convertImageToDataUrl(file);
+    }
+    if (imageFileRef.current) imageFileRef.current.value = "";
+  }
 
   const convertImageToDataUrl = (file: File) => {
     const reader = new FileReader();
@@ -807,7 +824,21 @@ export default function AdminPage() {
                           <option value="ml">Mililitro (ml)</option>
                         </select>
                         <div onDrop={handleImageDrop} onDragOver={handleImageDragOver} className="w-full rounded-xl border-2 border-dashed border-[#2f466d] bg-[#091426] px-3 py-4 transition-colors hover:border-[#0f5bd4]">
-                          <input value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} onPaste={handleImagePaste} placeholder="Cole a imagem ou arraste (Ctrl+V ou drag-drop)" className="w-full bg-transparent text-[#eef4ff] placeholder-[#7a95bd] outline-none" />
+                          <input value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} onPaste={handleImagePaste} placeholder="Cole (Ctrl+V) ou arraste a imagem aqui" className="w-full bg-transparent text-[#eef4ff] placeholder-[#7a95bd] outline-none" />
+                          <input
+                            ref={imageFileRef}
+                            type="file"
+                            accept="image/*"
+                            onChange={handleFileChange}
+                            className="hidden"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => imageFileRef.current?.click()}
+                            className="mt-3 w-full rounded-lg border border-[#2f466d] bg-[#13233f] px-3 py-2 text-xs font-bold text-[#8db5ff] hover:bg-[#1a2f50] transition"
+                          >
+                            📁 Selecionar imagem (celular ou computador)
+                          </button>
                           {imageUrl && (
                             <div className="mt-2 overflow-hidden rounded-lg">
                               <img src={imageUrl} alt="preview" className="h-20 w-auto object-cover" />
