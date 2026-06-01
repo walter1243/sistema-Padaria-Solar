@@ -12,7 +12,7 @@ import {
 
 const statusFlow: OrderStatus[] = ["novo", "preparando", "pronto", "entregue"];
 
-type AdminSection = "dashboard" | "menu" | "tables" | "orders" | "profile";
+type AdminSection = "dashboard" | "menu" | "cardapio" | "tables" | "orders" | "profile";
 
 type TableSummary = {
   tableId: string;
@@ -598,10 +598,11 @@ export default function AdminPage() {
         </div>
 
         <nav className="flex-1 p-4 space-y-2">
-          {(["dashboard", "menu", "tables", "orders", "profile"] as AdminSection[]).map((section) => {
+          {(["dashboard", "menu", "cardapio", "tables", "orders", "profile"] as AdminSection[]).map((section) => {
             const labels: Record<AdminSection, string> = {
               dashboard: "Dashboard",
               menu: "📦 Produtos",
+              cardapio: "📱 Cardápio Digital",
               tables: "🪑 Mesas",
               orders: "📋 Pedidos",
               profile: "👤 Perfil",
@@ -702,6 +703,7 @@ export default function AdminPage() {
               {activeSection === "menu" && "Cadastro de Produtos"}
               {activeSection === "tables" && "Mesas"}
               {activeSection === "orders" && "Pedidos"}
+              {activeSection === "cardapio" && "Cardápio Digital"}
               {activeSection === "profile" && "Perfil do Administrador"}
             </h1>
           </header>
@@ -950,6 +952,220 @@ export default function AdminPage() {
                           </div>
                         </article>
                       ))}
+                    </div>
+                  </section>
+                </div>
+              </div>
+            )}
+
+            {/* ─── CARDÁPIO DIGITAL ─── */}
+            {activeSection === "cardapio" && (
+              <div className="space-y-4">
+
+                {/* QR code + link card */}
+                <section className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
+                  <h2 className="text-xl font-bold text-white">QR Code do Cardápio Digital</h2>
+                  <p className="mt-1 text-xs text-[#9bb0d0]">
+                    Salve este QR no Instagram para clientes visualizarem todos os seus produtos.
+                  </p>
+                  <div className="mt-4 flex flex-col items-center gap-6 sm:flex-row sm:items-start">
+                    <div className="shrink-0">
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`${baseUrl}/cardapio`)}`}
+                        alt="QR Cardápio Digital"
+                        className="h-40 w-40 rounded-xl bg-white p-2 shadow-lg"
+                      />
+                    </div>
+                    <div className="w-full flex-1 space-y-3">
+                      <div>
+                        <p className="text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">Link público</p>
+                        <p className="mt-1 break-all rounded-lg border border-[#2f466d] bg-[#091426] px-3 py-2 font-mono text-sm text-[#eef4ff]">
+                          {baseUrl}/cardapio
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(`${baseUrl}/cardapio`);
+                              setFormNotice("Link do cardápio copiado!");
+                            } catch {
+                              setError("Não foi possível copiar o link.");
+                            }
+                          }}
+                          className="rounded-lg bg-[#0f5bd4] px-4 py-2 text-sm font-bold text-white hover:bg-[#0d4db8] transition"
+                        >
+                          📋 Copiar link
+                        </button>
+                        <a
+                          href={`${baseUrl}/cardapio`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="rounded-lg border border-[#365682] bg-[#13233f] px-4 py-2 text-sm font-bold text-[#d9e7ff] hover:bg-[#1a2f50] transition"
+                        >
+                          🔗 Abrir página
+                        </a>
+                      </div>
+                      <p className="text-xs text-[#6a88af]">
+                        Esta página exibe <strong className="text-[#8db5ff]">todos</strong> os produtos cadastrados e não possui carrinho — é só para exposição.
+                      </p>
+                    </div>
+                  </div>
+                </section>
+
+                {/* Product registration toggle */}
+                <div className="flex items-center justify-between rounded-2xl border border-[#234062] bg-[#0b1424] p-3">
+                  <p className="text-sm font-bold text-[#d9e7ff]">Cadastrar produto no catálogo</p>
+                  <button
+                    type="button"
+                    onClick={() => setShowProductForm((v) => !v)}
+                    className="rounded-lg border border-[#2f466d] bg-[#13233f] px-3 py-2 text-xs font-bold text-[#d6e3f8]"
+                  >
+                    {showProductForm ? "Fechar cadastro" : "Abrir cadastro"}
+                  </button>
+                </div>
+
+                <div className={`grid gap-4 ${showProductForm ? "xl:grid-cols-[360px_1fr]" : "xl:grid-cols-1"}`}>
+                  {/* Form (shared state with Produtos section) */}
+                  {showProductForm && (
+                    <form onSubmit={addMenu} className="h-fit rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
+                      <h2 className="text-2xl text-white">{editingItemId ? "Editar Item" : "Novo Item"}</h2>
+                      <div className="mt-4 space-y-2">
+                        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome" required className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]" />
+                        <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Descricao" required className="h-20 w-full resize-none rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]" />
+                        <input value={price} onChange={(e) => setPrice(e.target.value)} type="number" min="0" step="0.01" placeholder="Preco (referencia no cardapio)" required className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]" />
+                        <select value={category} onChange={(e) => setCategory(e.target.value as MenuCategory)} className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]">
+                          {categories.length > 0 ? (
+                            categories.map((cat) => <option key={cat}>{cat}</option>)
+                          ) : (
+                            <><option>Salgado</option><option>Lanche</option><option>Bebida</option><option>Doce</option></>
+                          )}
+                        </select>
+                        <select value={unit} onChange={(e) => setUnit(e.target.value as UnitMeasure)} className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]">
+                          <option value="un">Unidade (un)</option>
+                          <option value="kg">Quilo (kg)</option>
+                          <option value="g">Grama (g)</option>
+                          <option value="l">Litro (l)</option>
+                          <option value="ml">Mililitro (ml)</option>
+                        </select>
+                        <div onDrop={handleImageDrop} onDragOver={handleImageDragOver} className="w-full rounded-xl border-2 border-dashed border-[#2f466d] bg-[#091426] px-3 py-4 transition-colors hover:border-[#0f5bd4]">
+                          <input value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} onPaste={handleImagePaste} placeholder="Cole (Ctrl+V) ou arraste a imagem aqui" className="w-full bg-transparent text-[#eef4ff] placeholder-[#7a95bd] outline-none" />
+                          <input ref={imageFileRef} type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
+                          <button type="button" onClick={() => imageFileRef.current?.click()} className="mt-3 w-full rounded-lg border border-[#2f466d] bg-[#13233f] px-3 py-2 text-xs font-bold text-[#8db5ff] hover:bg-[#1a2f50] transition">
+                            📁 Selecionar imagem (celular ou computador)
+                          </button>
+                          {imageUrl && (
+                            <div className="mt-2 overflow-hidden rounded-lg">
+                              <img src={imageUrl} alt="preview" className="h-20 w-auto object-cover" />
+                            </div>
+                          )}
+                        </div>
+                        {/* Addons */}
+                        <div className="space-y-3">
+                          <h4 className="text-sm font-bold text-[#eef4ff]">Acompanhamentos</h4>
+                          <div className="space-y-2">
+                            {addonsList.map((addon, idx) => (
+                              <div key={idx} className="flex items-center gap-2 rounded-lg border border-[#2b4062] bg-[#101d33] p-2">
+                                <div className="flex-1 text-xs text-[#d6e3f8]">
+                                  <p className="font-bold">{addon.name}</p>
+                                  <p className="text-[#93a8c6]">{addon.description}</p>
+                                  <p className="text-[#8db5ff] font-semibold">{currency(addon.price)}</p>
+                                </div>
+                                <button type="button" onClick={() => setAddonsList(addonsList.filter((_, i) => i !== idx))} className="rounded px-2 py-1 text-xs font-bold text-[#ff8c98]">✕</button>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="space-y-2 rounded-lg border border-[#2f466d] bg-[#091426] p-3">
+                            <input value={newAddonName} onChange={(e) => setNewAddonName(e.target.value)} placeholder="Nome do acompanhamento" className="w-full rounded-lg border border-[#1f3a52] bg-[#0a0f1a] px-2 py-1 text-xs text-[#eef4ff]" />
+                            <input value={newAddonPrice} onChange={(e) => setNewAddonPrice(e.target.value)} placeholder="Preço" type="number" step="0.01" className="w-full rounded-lg border border-[#1f3a52] bg-[#0a0f1a] px-2 py-1 text-xs text-[#eef4ff]" />
+                            <input value={newAddonDesc} onChange={(e) => setNewAddonDesc(e.target.value)} placeholder="Descrição" className="w-full rounded-lg border border-[#1f3a52] bg-[#0a0f1a] px-2 py-1 text-xs text-[#eef4ff]" />
+                            <button type="button" onClick={() => { if (newAddonName.trim() && newAddonPrice.trim()) { setAddonsList([...addonsList, { name: newAddonName, price: Number(newAddonPrice), description: newAddonDesc }]); setNewAddonName(""); setNewAddonPrice(""); setNewAddonDesc(""); } }} className="w-full rounded-lg bg-[#0f5bd4] px-2 py-1 text-xs font-bold text-white">+ Adicionar</button>
+                          </div>
+                        </div>
+                        {editingItemId ? (
+                          <div className="flex gap-2">
+                            <button type="button" onClick={updateItem} className="flex-1 rounded-xl bg-[#0f5bd4] px-4 py-3 font-bold text-white">✏️ Atualizar Item</button>
+                            <button type="button" onClick={() => { setEditingItemId(null); setName(""); setDescription(""); setPrice(""); setUnit("un"); setImageUrl(""); setAddonsList([]); setNewAddonName(""); setNewAddonPrice(""); setNewAddonDesc(""); setFormNotice(""); }} className="flex-1 rounded-xl border border-[#2f466d] bg-[#13233f] px-4 py-3 font-bold text-[#d6e3f8]">Cancelar</button>
+                          </div>
+                        ) : (
+                          <button type="submit" className="w-full rounded-xl bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] px-4 py-3 font-bold text-white">Cadastrar Item</button>
+                        )}
+                      </div>
+                    </form>
+                  )}
+
+                  {/* All products with vitrine toggle */}
+                  <section className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
+                    <div className="mb-4 flex items-center justify-between">
+                      <h2 className="text-2xl font-bold text-white">Todos os produtos</h2>
+                      <span className="text-xs font-bold text-[#8db5ff]">{menu.length} produto(s)</span>
+                    </div>
+                    <p className="mb-4 text-xs text-[#9bb0d0]">
+                      <span className="font-bold text-[#8fe0b8]">Na vitrine</span> = aparece no cardápio de pedidos das mesas. &nbsp;
+                      <span className="font-bold text-[#8db5ff]">Só no catálogo</span> = exibido apenas na página do cardápio digital.
+                    </p>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {menu.map((item) => (
+                        <article key={item.id} className="rounded-2xl border border-[#2a4162] bg-[#101d33] p-3">
+                          <div className="flex gap-3">
+                            <div className="h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-[#0b1424]">
+                              {item.imageUrl ? (
+                                <img src={item.imageUrl} alt={item.name} className="h-full w-full object-cover" />
+                              ) : (
+                                <div className="flex h-full items-center justify-center text-2xl opacity-30">🍞</div>
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <h3 className="truncate text-sm font-bold text-white">{item.name}</h3>
+                              <p className="text-xs text-[#8db5ff]">{item.category}</p>
+                              <p className="text-xs font-bold text-[#8db5ff]">{currency(item.price)}</p>
+                            </div>
+                          </div>
+
+                          {/* Vitrine status + toggle */}
+                          <div className="mt-3 flex items-center justify-between gap-2">
+                            <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${
+                              item.available
+                                ? "bg-[#8fe0b8]/20 text-[#8fe0b8]"
+                                : "bg-[#8db5ff]/15 text-[#8db5ff]"
+                            }`}>
+                              {item.available ? "✓ Na vitrine" : "Só no catálogo"}
+                            </span>
+                            <button
+                              onClick={() => toggleAvailability(item)}
+                              className={`rounded-lg px-3 py-1.5 text-xs font-bold transition ${
+                                item.available
+                                  ? "border border-[#2e476f] bg-[#13233f] text-[#d3e4ff] hover:bg-[#1a2f50]"
+                                  : "bg-[#1f8b4c] text-white hover:bg-[#18703d]"
+                              }`}
+                            >
+                              {item.available ? "Remover da vitrine" : "Adicionar à vitrine"}
+                            </button>
+                          </div>
+
+                          {/* CRUD actions */}
+                          <div className="mt-2 flex gap-2">
+                            <button
+                              onClick={() => { editItem(item); }}
+                              className="flex-1 rounded-lg border border-[#0f5bd4] bg-[#0f5bd4]/20 px-2 py-1.5 text-xs font-bold text-[#0f9fff] hover:bg-[#0f5bd4]/40 transition"
+                            >
+                              ✏️ Editar
+                            </button>
+                            <button
+                              onClick={() => { setDeleteItemId(item.id); setDeleteModalOpen(true); setDeletePassword(""); }}
+                              className="rounded-lg bg-[#c81f2f] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#b01625] transition"
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                        </article>
+                      ))}
+                      {menu.length === 0 && (
+                        <p className="col-span-2 py-8 text-center text-sm text-[#93a8c6]">
+                          Nenhum produto cadastrado ainda.
+                        </p>
+                      )}
                     </div>
                   </section>
                 </div>
