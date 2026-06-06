@@ -377,7 +377,37 @@ export default function AdminPage() {
     }
     const raw = String(value ?? "").trim();
     if (!raw) return "0";
-    const normalized = raw.replace(/\s/g, "").replace("R$", "").replace(/\./g, "").replace(",", ".");
+
+    const compact = raw
+      .replace(/\s|\u00A0/g, "")
+      .replace(/R\$/gi, "")
+      .replace(/[^\d,.-]/g, "");
+    if (!compact) return "0";
+
+    const hasComma = compact.includes(",");
+    const hasDot = compact.includes(".");
+
+    let normalized = compact;
+
+    if (hasComma && hasDot) {
+      // Use the last separator as decimal and remove the other as thousands.
+      const lastComma = compact.lastIndexOf(",");
+      const lastDot = compact.lastIndexOf(".");
+      if (lastComma > lastDot) {
+        normalized = compact.replace(/\./g, "").replace(",", ".");
+      } else {
+        normalized = compact.replace(/,/g, "");
+      }
+    } else if (hasComma) {
+      normalized = /,\d{1,2}$/.test(compact)
+        ? compact.replace(/\./g, "").replace(",", ".")
+        : compact.replace(/,/g, "");
+    } else if (hasDot) {
+      normalized = /\.\d{1,2}$/.test(compact)
+        ? compact.replace(/,/g, "")
+        : compact.replace(/\./g, "");
+    }
+
     const only = normalized.match(/-?\d+(?:\.\d+)?/);
     const parsed = only ? Number(only[0]) : Number.NaN;
     return Number.isFinite(parsed) && parsed > 0 ? parsed.toFixed(2) : "0";
