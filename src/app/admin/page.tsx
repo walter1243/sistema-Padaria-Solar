@@ -1618,11 +1618,17 @@ export default function AdminPage() {
   }
 
   async function toggleAvailability(item: MenuItem) {
-    await fetch(`/api/menu/${item.id}`, {
+    const res = await fetch(`/api/menu/${item.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...item, available: !item.available }),
     });
+    if (!res.ok) {
+      const payload = (await res.json().catch(() => ({}))) as { error?: string };
+      setError(payload.error || "Nao foi possivel atualizar disponibilidade do produto.");
+      return;
+    }
+    setError("");
     loadData();
   }
 
@@ -1658,7 +1664,12 @@ export default function AdminPage() {
       setError("Senha incorreta. Use '123' para confirmar exclusao.");
       return;
     }
-    await fetch(`/api/menu/${id}`, { method: "DELETE" });
+    const res = await fetch(`/api/menu/${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const payload = (await res.json().catch(() => ({}))) as { error?: string };
+      setError(payload.error || "Nao foi possivel excluir produto no banco de dados.");
+      return;
+    }
     setDeleteModalOpen(false);
     setDeleteItemId(null);
     setDeletePassword("");

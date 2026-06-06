@@ -1,10 +1,17 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { products, categories, addons } from "@/lib/db/schema";
+import { products, categories, addons, orderItems } from "@/lib/db/schema";
 import { eq, ilike } from "drizzle-orm";
 import { UnitMeasure } from "@/lib/types";
 
 type Params = { params: Promise<{ id: string }> };
+
+function getDbErrorMessage(error: unknown) {
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as { message?: unknown }).message ?? "Erro de banco de dados.");
+  }
+  return "Erro de banco de dados.";
+}
 
 export async function PUT(request: Request, { params }: Params) {
   const { id } = await params;
@@ -45,11 +52,19 @@ export async function PUT(request: Request, { params }: Params) {
     return NextResponse.json({ error: "Nenhum campo para atualizar." }, { status: 400 });
   }
 
-  const [updated] = await db
-    .update(products)
-    .set(patch)
-    .where(eq(products.id, id))
-    .returning();
+  let updated;
+  try {
+    [updated] = await db
+      .update(products)
+      .set(patch)
+      .where(eq(products.id, id))
+      .returning();
+  } catch (error) {
+    return NextResponse.json(
+      { error: `Falha ao atualizar produto no banco: ${getDbErrorMessage(error)}` },
+      { status: 500 }
+    );
+  }
 
   if (!updated) {
     return NextResponse.json(
@@ -60,20 +75,27 @@ export async function PUT(request: Request, { params }: Params) {
 
   // Atualiza addons se enviados
   if (Array.isArray(body.addons)) {
-    await db.delete(addons).where(eq(addons.productId, id));
+    try {
+      await db.delete(addons).where(eq(addons.productId, id));
 
-    const safeAddons = body.addons
-      .filter((a: unknown): a is Record<string, unknown> => typeof a === "object" && a !== null)
-      .map((a: Record<string, unknown>) => ({
-        productId: id,
-        name: String(a.name ?? "").trim(),
-        price: String(Number(a.price ?? 0)),
-        description: String(a.description ?? "").trim(),
-      }))
-      .filter((a: { productId: string; name: string; price: string; description: string }) => a.name.length > 0);
+      const safeAddons = body.addons
+        .filter((a: unknown): a is Record<string, unknown> => typeof a === "object" && a !== null)
+        .map((a: Record<string, unknown>) => ({
+          productId: id,
+          name: String(a.name ?? "").trim(),
+          price: String(Number(a.price ?? 0)),
+          description: String(a.description ?? "").trim(),
+        }))
+        .filter((a: { productId: string; name: string; price: string; description: string }) => a.name.length > 0);
 
-    if (safeAddons.length > 0) {
-      await db.insert(addons).values(safeAddons);
+      if (safeAddons.length > 0) {
+        await db.insert(addons).values(safeAddons);
+      }
+    } catch (error) {
+      return NextResponse.json(
+        { error: `Produto atualizado, mas falhou ao salvar acompanhamentos: ${getDbErrorMessage(error)}` },
+        { status: 500 }
+      );
     }
   }
 
@@ -83,10 +105,34 @@ export async function PUT(request: Request, { params }: Params) {
 export async function DELETE(_request: Request, { params }: Params) {
   const { id } = await params;
 
-  const [removed] = await db
-    .delete(products)
-    .where(eq(products.id, id))
-    .returning();
+  let removed;
+  try {
+    // Mantem historico de pedidos: remove apenas o vinculo ao produto antes da exclusao fisica.
+    await db.update(orderItems).set({ productId: null }).where(eq(orderItems.productId, id));
+
+    [removed] = await db
+      .delete(products)
+      .where(eq(products.id, id))
+      .returning();
+  } catch (error) {
+    const message = getDbErrorMessage(error);
+    const isForeignKeyError = message.toLowerCase().includes("violates foreign key constraint");
+
+    if (isForeignKeyError) {
+      return NextResponse.json(
+        {
+          error:
+            "Nao foi possivel excluir este produto porque ele ja foi usado em pedidos. Exclua os pedidos relacionados ou inative o produto.",
+        },
+        { status: 409 }
+      );
+    }
+
+    return NextResponse.json(
+      { error: `Falha ao excluir produto do banco: ${message}` },
+      { status: 500 }
+    );
+  }
 
   if (!removed) {
     return NextResponse.json(
