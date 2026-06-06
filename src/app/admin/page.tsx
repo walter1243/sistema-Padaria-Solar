@@ -13,7 +13,6 @@ import {
 const statusFlow: OrderStatus[] = ["novo", "preparando", "pronto", "entregue"];
 
 type AdminSection = "dashboard" | "menu" | "cardapio" | "tables" | "orders" | "profile";
-
 type TableSummary = {
   tableId: string;
   count: number;
@@ -96,7 +95,6 @@ export default function AdminPage() {
   const [adminNewPassword, setAdminNewPassword] = useState("");
   const [adminConfirmPassword, setAdminConfirmPassword] = useState("");
   const [tableSummaries, setTableSummaries] = useState<TableSummary[]>([]);
-  const [showProductForm, setShowProductForm] = useState(false);
   const [showKitchenAuthEditor, setShowKitchenAuthEditor] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -112,12 +110,13 @@ export default function AdminPage() {
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [orderStatusFilter, setOrderStatusFilter] = useState<OrderStatus | "">("");
   const [orderTableFilter, setOrderTableFilter] = useState("");
+  const [menuTab, setMenuTab] = useState<"categorias" | "produto" | "pdf" | "lista">("lista");
+  const [cardapioTab, setCardapioTab] = useState<"qrcode" | "vitrine">("qrcode");
 
   const imageFileRef = useRef<HTMLInputElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const replaceProductImageRef = useRef<HTMLInputElement>(null);
 
-  const [showPdfImport, setShowPdfImport] = useState(false);
   const [pdfProcessing, setPdfProcessing] = useState(false);
   const [extractedProducts, setExtractedProducts] = useState<ExtractedProduct[]>([]);
   const [importingProducts, setImportingProducts] = useState(false);
@@ -196,6 +195,33 @@ export default function AdminPage() {
       loadData();
     }
   }, [authorized, refreshTick]);
+
+  useEffect(() => {
+    function onWindowPaste(ev: ClipboardEvent) {
+      if (!(activeSection === "menu" && menuTab === "pdf" && extractedProducts.length === 0)) return;
+      const target = ev.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+        return;
+      }
+      const files = Array.from(ev.clipboardData?.files || []);
+      const picked = files.find((f) => isSupportedImportFile(f));
+      if (picked) {
+        ev.preventDefault();
+        void processImportFile(picked);
+        return;
+      }
+
+      const text = ev.clipboardData?.getData("text/plain") || "";
+      const products = parseClipboardTable(text);
+      if (products.length > 0) {
+        ev.preventDefault();
+        openReviewWithSmartImageStart(products, "texto colado");
+      }
+    }
+
+    window.addEventListener("paste", onWindowPaste);
+    return () => window.removeEventListener("paste", onWindowPaste);
+  }, [activeSection, menuTab, extractedProducts.length]);
 
   const todayOrders = useMemo(() => {
     const todayStr = new Date().toLocaleDateString("pt-BR");
@@ -332,13 +358,399 @@ export default function AdminPage() {
     if (imageFileRef.current) imageFileRef.current.value = "";
   }
 
+  function isSupportedImportFile(file: File) {
+    const name = file.name.toLowerCase();
+    return (
+      name.endsWith(".pdf") ||
+      name.endsWith(".xlsx") ||
+      name.endsWith(".xls") ||
+      name.endsWith(".docx") ||
+      name.endsWith(".pptx") ||
+      name.endsWith(".doc") ||
+      name.endsWith(".ppt")
+    );
+  }
+
+  function parsePriceToString(value: unknown): string {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value > 0 ? value.toFixed(2) : "0";
+    }
+    const raw = String(value ?? "").trim();
+    if (!raw) return "0";
+    const normalized = raw.replace(/\s/g, "").replace("R$", "").replace(/\./g, "").replace(",", ".");
+    const only = normalized.match(/-?\d+(?:\.\d+)?/);
+    const parsed = only ? Number(only[0]) : Number.NaN;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed.toFixed(2) : "0";
+  }
+
+  function parseClipboardTable(text: string): ExtractedProduct[] {
+    const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (lines.length === 0) return [];
+
+    const rows = lines.map((line) => {
+      if (line.includes("\t")) return line.split("\t").map((c) => c.trim());
+      if (line.includes(";")) return line.split(";").map((c) => c.trim());
+      return [line.trim()];
+    });
+
+    const { defaultCat, defaultUnit } = getImportDefaults();
+    const header = rows[0].map((h) => h.toLowerCase());
+    const idxName = header.findIndex((h) => h.includes("produto") || h.includes("nome") || h.includes("item"));
+    const idxDesc = header.findIndex((h) => h.includes("descr"));
+    const idxPrice = header.findIndex((h) => h.includes("pre") || h.includes("valor") || h.includes("price"));
+    const hasHeader = idxName >= 0 || idxPrice >= 0;
+
+    const products: ExtractedProduct[] = [];
+    for (let i = hasHeader ? 1 : 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (row.every((c) => !c)) continue;
+
+      const name = idxName >= 0 ? (row[idxName] || "") : (row[0] || "");
+      const desc = idxDesc >= 0 ? (row[idxDesc] || "") : (row[1] || "");
+      const price = parsePriceToString(idxPrice >= 0 ? row[idxPrice] : row[2]);
+
+      if (!name && !desc && price === "0") continue;
+
+      products.push({
+        id: crypto.randomUUID(),
+        selected: true,
+        name: name || `Produto ${products.length + 1}`,
+        description: (desc || name || "Produto importado").slice(0, 240),
+        price,
+        unit: defaultUnit,
+        category: defaultCat,
+        imageUrl: "",
+      });
+    }
+
+    return products;
+  }
+
+  async function loadScriptGlobal<T = unknown>(
+    globalKey: string,
+    scriptUrl: string,
+    onLoad?: (w: Window & typeof globalThis) => void,
+  ): Promise<T> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const w = window as any;
+    if (w[globalKey]) return w[globalKey] as T;
+
+    await new Promise<void>((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = scriptUrl;
+      script.async = true;
+      script.onload = () => {
+        if (onLoad) onLoad(window);
+        resolve();
+      };
+      script.onerror = () => reject(new Error("Falha ao carregar biblioteca externa."));
+      document.head.appendChild(script);
+    });
+
+    if (!w[globalKey]) {
+      throw new Error("Biblioteca carregada, mas não foi inicializada corretamente.");
+    }
+    return w[globalKey] as T;
+  }
+
+  function getImportDefaults() {
+    return {
+      defaultCat: importDefaultCategory || categories[0] || "Salgado",
+      defaultUnit: importDefaultUnit || "un",
+    };
+  }
+
+  function productsFromTextLines(lines: string[], sourceName: string): ExtractedProduct[] {
+    const cleaned = lines.map((l) => l.trim()).filter(Boolean);
+    const { defaultCat, defaultUnit } = getImportDefaults();
+    const priceRe = /R\$\s*([\d]{1,3}(?:[.][\d]{3})*)[,]([\d]{2})|([\d]+(?:[.,][\d]{2}))/;
+    const skipRe = /^[-_=•·*]{2,}$|^\d+$/i;
+
+    let buf = { name: "", desc: "" };
+    const out: ExtractedProduct[] = [];
+
+    for (const line of cleaned) {
+      if (skipRe.test(line)) continue;
+      const m = line.match(priceRe);
+      if (m) {
+        const price = m[1] && m[2] ? `${m[1].replace(/\./g, "")}.${m[2]}` : parsePriceToString(m[3] || "0");
+        if (buf.name) {
+          out.push({
+            id: crypto.randomUUID(),
+            selected: true,
+            name: buf.name,
+            description: (buf.desc || buf.name).slice(0, 240),
+            price,
+            unit: defaultUnit,
+            category: defaultCat,
+            imageUrl: "",
+          });
+        }
+        buf = { name: "", desc: "" };
+      } else if (!buf.name) {
+        buf.name = line;
+      } else if (!buf.desc) {
+        buf.desc = line;
+      } else {
+        buf.desc = `${buf.desc} ${line}`.slice(0, 320);
+      }
+    }
+
+    if (buf.name) {
+      out.push({
+        id: crypto.randomUUID(),
+        selected: true,
+        name: buf.name,
+        description: (buf.desc || buf.name).slice(0, 240),
+        price: "0",
+        unit: defaultUnit,
+        category: defaultCat,
+        imageUrl: "",
+      });
+    }
+
+    if (out.length === 0 && cleaned.length > 0) {
+      const merged = cleaned.join(" ").slice(0, 220);
+      out.push({
+        id: crypto.randomUUID(),
+        selected: true,
+        name: sourceName.replace(/\.[^.]+$/, "") || "Produto importado",
+        description: merged || "Produto sem texto reconhecido",
+        price: "0",
+        unit: defaultUnit,
+        category: defaultCat,
+        imageUrl: "",
+      });
+    }
+
+    return out;
+  }
+
+  async function parseExcelFile(file: File): Promise<ExtractedProduct[]> {
+    type XlsxGlobal = {
+      read: (data: ArrayBuffer, opts: { type: "array" }) => {
+        SheetNames: string[];
+        Sheets: Record<string, unknown>;
+      };
+      utils: {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        sheet_to_json: (sheet: unknown, opts: { header: 1; defval: string }) => any[][];
+      };
+    };
+
+    const XLSX = await loadScriptGlobal<XlsxGlobal>(
+      "XLSX",
+      "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js",
+    );
+
+    const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+    const { defaultCat, defaultUnit } = getImportDefaults();
+    const products: ExtractedProduct[] = [];
+
+    for (const sheetName of wb.SheetNames) {
+      const sheet = wb.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" })
+        .map((row) => row.map((c) => String(c ?? "").trim()));
+      if (rows.length === 0) continue;
+
+      const header = rows[0].map((h) => h.toLowerCase());
+      const idxName = header.findIndex((h) => h.includes("produto") || h.includes("nome") || h.includes("item"));
+      const idxDesc = header.findIndex((h) => h.includes("descr"));
+      const idxPrice = header.findIndex((h) => h.includes("pre") || h.includes("valor") || h.includes("price"));
+      const idxCat = header.findIndex((h) => h.includes("categ"));
+      const idxUnit = header.findIndex((h) => h.includes("unid") || h.includes("unit"));
+      const startsWithHeader = idxName >= 0 || idxPrice >= 0;
+
+      for (let i = startsWithHeader ? 1 : 0; i < rows.length; i++) {
+        const row = rows[i];
+        if (row.every((c) => !c)) continue;
+
+        const name = idxName >= 0 ? (row[idxName] || "") : (row[0] || "");
+        const description = idxDesc >= 0 ? (row[idxDesc] || "") : (row[1] || "");
+        const priceRaw = idxPrice >= 0 ? (row[idxPrice] || "") : (row[2] || "");
+        const price = parsePriceToString(priceRaw);
+        const categoryValue = idxCat >= 0 ? (row[idxCat] || "") : "";
+        const unitValue = idxUnit >= 0 ? (row[idxUnit] || "") : "";
+
+        if (!name && !description && price === "0") continue;
+
+        products.push({
+          id: crypto.randomUUID(),
+          selected: true,
+          name: name || `Produto ${products.length + 1}`,
+          description: (description || name || "Produto importado do Excel").slice(0, 240),
+          price,
+          unit: unitValue || defaultUnit,
+          category: categoryValue || defaultCat,
+          imageUrl: "",
+        });
+      }
+    }
+
+    return products;
+  }
+
+  async function parseWordFile(file: File): Promise<ExtractedProduct[]> {
+    type MammothGlobal = {
+      extractRawText: (input: { arrayBuffer: ArrayBuffer }) => Promise<{ value: string }>;
+    };
+
+    const mammoth = await loadScriptGlobal<MammothGlobal>(
+      "mammoth",
+      "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js",
+    );
+
+    const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+    const lines = result.value.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    return productsFromTextLines(lines, file.name);
+  }
+
+  function decodeXmlText(text: string) {
+    return text
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'");
+  }
+
+  async function parsePowerPointFile(file: File): Promise<ExtractedProduct[]> {
+    type ZipFileObj = { async: (type: "string") => Promise<string> };
+    type JSZipGlobal = {
+      loadAsync: (data: ArrayBuffer) => Promise<{ files: Record<string, ZipFileObj | undefined> }>;
+    };
+
+    const JSZip = await loadScriptGlobal<JSZipGlobal>(
+      "JSZip",
+      "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js",
+    );
+
+    const zip = await JSZip.loadAsync(await file.arrayBuffer());
+    const slidePaths = Object.keys(zip.files)
+      .filter((p) => /^ppt\/slides\/slide\d+\.xml$/i.test(p))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+    const lines: string[] = [];
+    for (const path of slidePaths) {
+      const xmlFile = zip.files[path];
+      if (!xmlFile) continue;
+      const xml = await xmlFile.async("string");
+      const matches = [...xml.matchAll(/<a:t>(.*?)<\/a:t>/g)];
+      for (const m of matches) {
+        const text = decodeXmlText(m[1] || "").trim();
+        if (text) lines.push(text);
+      }
+    }
+
+    return productsFromTextLines(lines, file.name);
+  }
+
+  function openReviewWithSmartImageStart(products: ExtractedProduct[], sourceLabel: string) {
+    if (products.length === 0) {
+      setError(`Nenhum conteúdo reconhecido em ${sourceLabel}.`);
+      return;
+    }
+
+    setExtractedProducts(products);
+    const firstWithoutImage = products.findIndex((p) => !p.imageUrl || p.imageUrl.trim().length === 0);
+    setCurrentImportIdx(firstWithoutImage >= 0 ? firstWithoutImage : 0);
+    setShowImportModal(true);
+
+    const withoutImageCount = products.filter((p) => !p.imageUrl || p.imageUrl.trim().length === 0).length;
+    setFormNotice(
+      `${products.length} produto(s) extraído(s) de ${sourceLabel}.` +
+      (withoutImageCount > 0
+        ? ` ${withoutImageCount} sem imagem detectada. A revisão abriu no primeiro item sem imagem.`
+        : ""),
+    );
+  }
+
+  async function processImportFile(file: File) {
+    if (!isSupportedImportFile(file)) {
+      setError("Formato não suportado. Use PDF, Excel, Word ou PowerPoint.");
+      return;
+    }
+
+    const lower = file.name.toLowerCase();
+
+    if (lower.endsWith(".pdf")) {
+      await processPdf(file);
+      return;
+    }
+
+    if (lower.endsWith(".doc") || lower.endsWith(".ppt")) {
+      setError("Arquivos .doc e .ppt antigos não são suportados diretamente. Salve como .docx/.pptx e tente novamente.");
+      return;
+    }
+
+    setPdfProcessing(true);
+    setExtractedProducts([]);
+    setImportResult(null);
+    setError("");
+
+    try {
+      let products: ExtractedProduct[] = [];
+      if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
+        products = await parseExcelFile(file);
+      } else if (lower.endsWith(".docx")) {
+        products = await parseWordFile(file);
+      } else if (lower.endsWith(".pptx")) {
+        products = await parsePowerPointFile(file);
+      }
+
+      openReviewWithSmartImageStart(products, file.name);
+    } catch (e) {
+      setError("Erro ao processar arquivo: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setPdfProcessing(false);
+    }
+  }
+
+  async function importFromInputFile(file?: File | null) {
+    if (!file) return;
+    await processImportFile(file);
+  }
+
+  function handleImportDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    const files = Array.from(e.dataTransfer.files || []);
+    const target = files.find((f) => isSupportedImportFile(f));
+    if (target) {
+      void processImportFile(target);
+    } else {
+      setError("Arquivo não suportado no drop. Use PDF, Excel, Word ou PowerPoint.");
+    }
+  }
+
+  function handleImportDragOver(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  function handleImportPaste(e: React.ClipboardEvent<HTMLDivElement>) {
+    const files = Array.from(e.clipboardData.files || []);
+    const target = files.find((f) => isSupportedImportFile(f));
+    if (target) {
+      e.preventDefault();
+      void processImportFile(target);
+      return;
+    }
+
+    const text = e.clipboardData.getData("text/plain");
+    const products = parseClipboardTable(text);
+    if (products.length > 0) {
+      e.preventDefault();
+      openReviewWithSmartImageStart(products, "texto colado");
+    }
+  }
+
   async function processPdf(file: File) {
     setPdfProcessing(true);
     setExtractedProducts([]);
     setImportResult(null);
     setError("");
     try {
-      // Load pdfjs from CDN at runtime — avoids webpack bundling
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const pdfjsLib: any = await new Promise((resolve, reject) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -362,8 +774,6 @@ export default function AdminPage() {
 
       for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
         const page = await pdf.getPage(pageNum);
-
-        // ── 1. Render full page to canvas (fallback image) ──────────────
         const viewport = page.getViewport({ scale: 0.9 });
         const pageCanvas = document.createElement("canvas");
         pageCanvas.width = Math.floor(viewport.width);
@@ -372,8 +782,6 @@ export default function AdminPage() {
         if (pageCtx) await page.render({ canvasContext: pageCtx, viewport }).promise;
         const pageImageFallback = pageCanvas.toDataURL("image/jpeg", 0.6);
 
-        // ── 2. Extract embedded XObject images from the page ─────────────
-        // After render(), page.objs is populated with all image resources.
         const embeddedImages: string[] = [];
         try {
           const opList = await page.getOperatorList();
@@ -392,7 +800,6 @@ export default function AdminPage() {
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               const imgData: any = await new Promise((res) => page.objs.get(ref, res));
               if (!imgData?.width || !imgData?.height || !imgData?.data) continue;
-              // Skip tiny decorative images
               if (imgData.width < 80 || imgData.height < 80) continue;
 
               const ic = document.createElement("canvas");
@@ -405,12 +812,12 @@ export default function AdminPage() {
 
               for (let p = 0; p < pixCount; p++) {
                 if (ch === 4) {
-                  rgba[p * 4]     = imgData.data[p * 4];
+                  rgba[p * 4] = imgData.data[p * 4];
                   rgba[p * 4 + 1] = imgData.data[p * 4 + 1];
                   rgba[p * 4 + 2] = imgData.data[p * 4 + 2];
                   rgba[p * 4 + 3] = imgData.data[p * 4 + 3];
                 } else if (ch === 3) {
-                  rgba[p * 4]     = imgData.data[p * 3];
+                  rgba[p * 4] = imgData.data[p * 3];
                   rgba[p * 4 + 1] = imgData.data[p * 3 + 1];
                   rgba[p * 4 + 2] = imgData.data[p * 3 + 2];
                   rgba[p * 4 + 3] = 255;
@@ -425,11 +832,10 @@ export default function AdminPage() {
               id2.data.set(rgba);
               ictx.putImageData(id2, 0, 0);
               embeddedImages.push(ic.toDataURL("image/jpeg", 0.8));
-            } catch { /* skip image errors */ }
+            } catch { }
           }
-        } catch { /* fallback to page render if opList fails */ }
+        } catch { }
 
-        // ── 3. Extract text with positions ───────────────────────────────
         const textContent = await page.getTextContent();
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const rawItems = (textContent.items as any[])
@@ -457,9 +863,6 @@ export default function AdminPage() {
         const lastJoined = parts.join(" ").trim();
         if (lastJoined) lines.push(lastJoined);
 
-        // ── 4. Parse products — price anchors each block ──────────────────
-        // Accepts: R$ 12,90 | R$ 1.290,00 | R$12,90
-        // ── 4-5. Defaults + parse products ──────────────────────────────
         const defaultCat = importDefaultCategory || categories[0] || "Salgado";
         const defaultUnit = importDefaultUnit || "un";
 
@@ -509,8 +912,6 @@ export default function AdminPage() {
           });
         }
 
-        // For scanned/image PDFs with no text: add one empty product per page
-        // so the user can fill in details manually (image is the page render).
         if (pageProducts.length === 0 && pageImageFallback) {
           allProducts.push({
             id: crypto.randomUUID(),
@@ -538,14 +939,7 @@ export default function AdminPage() {
       if (allProducts.length === 0) {
         setError("Nenhum conteúdo encontrado. Verifique se o PDF tem pelo menos uma página.");
       } else {
-        setExtractedProducts(allProducts);
-        setCurrentImportIdx(0);
-        setShowImportModal(true);
-        const emptyCount = allProducts.filter((p) => !p.name).length;
-        setFormNotice(
-          `${allProducts.length} produto(s) extraído(s).` +
-          (emptyCount > 0 ? ` ${emptyCount} sem texto detectado — preencha manualmente.` : ""),
-        );
+        openReviewWithSmartImageStart(allProducts, file.name);
       }
     } catch (e) {
       setError("Erro ao processar PDF: " + (e instanceof Error ? e.message : String(e)));
@@ -575,7 +969,6 @@ export default function AdminPage() {
       available: true,
     }));
 
-    // Fake progress while calling bulk endpoint
     const progressInterval = setInterval(() => {
       setImportProgress((v) => Math.min(v + 5, 90));
     }, 200);
@@ -759,7 +1152,8 @@ export default function AdminPage() {
   function editItem(item: MenuItem) {
     applyDraftToForm(buildDraftFromItem(item));
     setEditingItemId(item.id);
-    setShowProductForm(true);
+    setMenuTab("produto");
+    setActiveSection("menu");
     setFormNotice(`Editando: ${item.name}`);
   }
 
@@ -1065,42 +1459,165 @@ export default function AdminPage() {
 
             {/* ─── MENU ─── */}
             {activeSection === "menu" && (
-              <div className="space-y-4">
-                <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-[#234062] bg-[#0b1424] p-3">
-                  <p className="flex-1 text-sm font-bold text-[#d9e7ff]">Cadastro de produtos</p>
-                  <button
-                    type="button"
-                    onClick={() => { setShowPdfImport(false); setShowProductForm((v) => !v); }}
-                    className="rounded-lg border border-[#2f466d] bg-[#13233f] px-3 py-2 text-xs font-bold text-[#d6e3f8]"
-                  >
-                    {showProductForm && !showPdfImport ? "Fechar cadastro" : "Abrir cadastro"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setShowProductForm(false); setShowPdfImport((v) => !v); }}
-                    className={`rounded-lg px-3 py-2 text-xs font-bold transition ${
-                      showPdfImport
-                        ? "bg-[#0f5bd4] text-white"
-                        : "border border-[#0f5bd4] bg-[#0f5bd4]/15 text-[#8db5ff] hover:bg-[#0f5bd4]/30"
-                    }`}
-                  >
-                    📥 Importar via PDF
-                  </button>
+              <div className="space-y-3">
+                {/* ── Tab bar ── */}
+                <div className="overflow-x-auto">
+                  <div className="flex min-w-max gap-1.5 rounded-2xl border border-[#234062] bg-[#0b1424] p-1.5">
+                    {([
+                      { id: "lista",      label: "📋 Produtos",     badge: menu.length },
+                      { id: "categorias", label: "📂 Categorias",   badge: categories.length },
+                      { id: "produto",    label: editingItemId ? "✏️ Editando" : "➕ Novo produto" },
+                      { id: "pdf",        label: "📥 Importar Arquivo" },
+                    ] as { id: typeof menuTab; label: string; badge?: number }[]).map(({ id, label, badge }) => (
+                      <button key={id} type="button" onClick={() => setMenuTab(id)}
+                        className={`shrink-0 rounded-xl px-4 py-2.5 text-sm font-bold transition-all ${
+                          menuTab === id
+                            ? "bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] text-white shadow-lg"
+                            : "text-[#8db5ff] hover:bg-[#13233f]"
+                        }`}>
+                        {label}{badge !== undefined ? ` (${badge})` : ""}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
-                {/* ── PDF Import Panel ── */}
-                {showPdfImport && (
+                {/* ── Aba: Lista de Produtos ── */}
+                {menuTab === "lista" && (
+                  <section className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
+                    <div className="mb-4 space-y-2">
+                      <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="🔍 Pesquisar por nome ou descrição..." className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-4 py-3 text-[#eef4ff] placeholder:text-[#7a94b8]" />
+                      <div className="flex gap-2">
+                        <select value={searchCategory} onChange={(e) => setSearchCategory((e.target.value as MenuCategory) || "")} className="flex-1 rounded-xl border border-[#2f466d] bg-[#091426] px-4 py-2 text-[#eef4ff]">
+                          <option value="">Todas as categorias</option>
+                          {categories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
+                        </select>
+                        {(searchQuery || searchCategory) && (
+                          <button onClick={() => { setSearchQuery(""); setSearchCategory(""); }} className="rounded-xl border border-[#2f466d] bg-[#13233f] px-4 py-2 text-sm font-bold text-[#d6e3f8]">Limpar</button>
+                        )}
+                      </div>
+                    </div>
+                    <p className="mb-3 text-xs text-[#8db5ff]">{filteredMenu.length} produto(s)</p>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {filteredMenu.map((item) => (
+                        <article key={item.id} className="rounded-2xl border border-[#2a4162] bg-[#101d33] p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <h3 className="text-xl leading-none text-white">{item.name}</h3>
+                            <span className={`text-xs font-bold uppercase tracking-[0.1em] px-2 py-1 rounded ${item.available ? "bg-[#8fe0b8]/20 text-[#8fe0b8]" : "bg-[#ff8c98]/20 text-[#ff8c98]"}`}>
+                              {item.available ? "Vitrine" : "Só catálogo"}
+                            </span>
+                          </div>
+                          <span className="inline-block mt-2 text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">{item.category}</span>
+                          <div className="mt-2 overflow-hidden rounded-lg border border-[#2b4062] bg-[#0b1424]">
+                            <img src={item.imageUrl} alt={item.name} className="h-24 w-full object-cover" />
+                          </div>
+                          {item.addons && item.addons.length > 0 && (
+                            <p className="mt-2 text-xs text-[#97afcf]">Acompanhamentos: {item.addons.map((a) => a.name).join(", ")}</p>
+                          )}
+                          <p className="mt-2 text-sm font-bold text-[#8db5ff]">{currency(item.price)}</p>
+                          <p className="mt-1 text-xs text-[#8db5ff]">Unidade: {item.unit}</p>
+                          <div className="mt-3 flex gap-2 flex-wrap">
+                            <button onClick={() => editItem(item)} className="rounded-lg border border-[#0f5bd4] bg-[#0f5bd4]/20 px-3 py-2 text-xs font-bold text-[#0f9fff] hover:bg-[#0f5bd4]/40 transition">✏️ Editar</button>
+                            <button onClick={() => toggleAvailability(item)} className="flex-1 rounded-lg border border-[#2e476f] bg-[#13233f] px-2 py-2 text-xs font-bold text-[#d3e4ff] hover:bg-[#1a2f50] transition">
+                              {item.available ? "🔒 Remover vitrine" : "🔓 Adicionar vitrine"}
+                            </button>
+                            <button onClick={() => { setDeleteItemId(item.id); setDeleteModalOpen(true); setDeletePassword(""); }} className="rounded-lg bg-[#c81f2f] px-3 py-2 text-xs font-bold text-white hover:bg-[#b01625] transition">🗑️</button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {/* ── Aba: Categorias ── */}
+                {menuTab === "categorias" && (
+                  <section className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
+                    <h2 className="text-xl font-bold text-white">Categorias do cardápio</h2>
+                    <p className="mt-1 text-xs text-[#9bb0d0]">Adicione ou remova categorias usadas no cadastro de produtos.</p>
+                    <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                      <input value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} placeholder="Nova categoria"
+                        className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]"
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addMenuCategory(); } }} />
+                      <button type="button" onClick={addMenuCategory} className="rounded-xl bg-[#0f5bd4] px-5 py-2 font-bold text-white">Adicionar</button>
+                    </div>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {categories.map((cat) => (
+                        <div key={cat} className="flex items-center gap-2 rounded-lg border border-[#2b4062] bg-[#101d33] px-3 py-2">
+                          <span className="text-xs font-bold uppercase tracking-[0.06em] text-[#d6e3f8]">{cat}</span>
+                          <button type="button" onClick={() => removeMenuCategory(cat)} className="rounded px-2 py-1 text-xs font-bold text-[#ff8c98] hover:bg-[#1a2a3f]">Remover</button>
+                        </div>
+                      ))}
+                      {categories.length === 0 && <p className="text-sm text-[#93a8c6]">Nenhuma categoria cadastrada ainda.</p>}
+                    </div>
+                  </section>
+                )}
+
+                {/* ── Aba: Novo Produto / Editar ── */}
+                {menuTab === "produto" && (
+                  <form onSubmit={addMenu} className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
+                    <h2 className="text-2xl text-white">{editingItemId ? "Editar Item" : "Novo Item"}</h2>
+                    <div className="mt-4 space-y-2">
+                      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome" required className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]" />
+                      <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Descricao" required className="h-20 w-full resize-none rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]" />
+                      <input value={price} onChange={(e) => setPrice(e.target.value)} type="number" min="0" step="0.01" placeholder="Preco (referencia no cardapio)" required className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]" />
+                      <select value={category} onChange={(e) => setCategory(e.target.value as MenuCategory)} className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]">
+                        {categories.length > 0 ? categories.map((cat) => <option key={cat}>{cat}</option>) : <><option>Salgado</option><option>Lanche</option><option>Bebida</option><option>Doce</option></>}
+                      </select>
+                      <select value={unit} onChange={(e) => setUnit(e.target.value as UnitMeasure)} className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]">
+                        <option value="un">Unidade (un)</option><option value="kg">Quilo (kg)</option><option value="g">Grama (g)</option><option value="l">Litro (l)</option><option value="ml">Mililitro (ml)</option>
+                      </select>
+                      <div onDrop={handleImageDrop} onDragOver={handleImageDragOver} className="w-full rounded-xl border-2 border-dashed border-[#2f466d] bg-[#091426] px-3 py-4 transition-colors hover:border-[#0f5bd4]">
+                        <input value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} onPaste={handleImagePaste} placeholder="Cole (Ctrl+V) ou arraste a imagem aqui" className="w-full bg-transparent text-[#eef4ff] placeholder-[#7a95bd] outline-none" />
+                        <input ref={imageFileRef} type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
+                        <button type="button" onClick={() => imageFileRef.current?.click()} className="mt-3 w-full rounded-lg border border-[#2f466d] bg-[#13233f] px-3 py-2 text-xs font-bold text-[#8db5ff] hover:bg-[#1a2f50] transition">
+                          📁 Selecionar imagem (celular ou computador)
+                        </button>
+                        {imageUrl && <div className="mt-2 overflow-hidden rounded-lg"><img src={imageUrl} alt="preview" className="h-20 w-auto object-cover" /></div>}
+                      </div>
+                      {/* Acompanhamentos */}
+                      <div className="space-y-3">
+                        <h4 className="text-sm font-bold text-[#eef4ff]">Acompanhamentos</h4>
+                        <div className="space-y-2">
+                          {addonsList.map((addon, idx) => (
+                            <div key={idx} className="flex items-center gap-2 rounded-lg border border-[#2b4062] bg-[#101d33] p-2">
+                              <div className="flex-1 text-xs text-[#d6e3f8]">
+                                <p className="font-bold">{addon.name}</p>
+                                <p className="text-[#93a8c6]">{addon.description}</p>
+                                <p className="text-[#8db5ff] font-semibold">{currency(addon.price)}</p>
+                              </div>
+                              <button type="button" onClick={() => setAddonsList(addonsList.filter((_, i) => i !== idx))} className="rounded px-2 py-1 text-xs font-bold text-[#ff8c98]">✕</button>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="space-y-2 rounded-lg border border-[#2f466d] bg-[#091426] p-3">
+                          <input value={newAddonName} onChange={(e) => setNewAddonName(e.target.value)} placeholder="Nome do acompanhamento" className="w-full rounded-lg border border-[#1f3a52] bg-[#0a0f1a] px-2 py-1 text-xs text-[#eef4ff]" />
+                          <input value={newAddonPrice} onChange={(e) => setNewAddonPrice(e.target.value)} placeholder="Preço" type="number" step="0.01" className="w-full rounded-lg border border-[#1f3a52] bg-[#0a0f1a] px-2 py-1 text-xs text-[#eef4ff]" />
+                          <input value={newAddonDesc} onChange={(e) => setNewAddonDesc(e.target.value)} placeholder="Descrição" className="w-full rounded-lg border border-[#1f3a52] bg-[#0a0f1a] px-2 py-1 text-xs text-[#eef4ff]" />
+                          <button type="button" onClick={() => { if (newAddonName.trim() && newAddonPrice.trim()) { setAddonsList([...addonsList, { name: newAddonName, price: Number(newAddonPrice), description: newAddonDesc }]); setNewAddonName(""); setNewAddonPrice(""); setNewAddonDesc(""); } }} className="w-full rounded-lg bg-[#0f5bd4] px-2 py-1 text-xs font-bold text-white">+ Adicionar</button>
+                        </div>
+                      </div>
+                      {editingItemId ? (
+                        <div className="flex gap-2">
+                          <button type="button" onClick={updateItem} className="flex-1 rounded-xl bg-[#0f5bd4] px-4 py-3 font-bold text-white">✏️ Atualizar Item</button>
+                          <button type="button" onClick={() => { setEditingItemId(null); setName(""); setDescription(""); setPrice(""); setUnit("un"); setImageUrl(""); setAddonsList([]); setNewAddonName(""); setNewAddonPrice(""); setNewAddonDesc(""); setFormNotice(""); setMenuTab("lista"); }} className="flex-1 rounded-xl border border-[#2f466d] bg-[#13233f] px-4 py-3 font-bold text-[#d6e3f8]">Cancelar</button>
+                        </div>
+                      ) : (
+                        <button type="submit" className="w-full rounded-xl bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] px-4 py-3 font-bold text-white">Cadastrar Item</button>
+                      )}
+                    </div>
+                  </form>
+                )}
+
+                {/* ── Aba: Importar PDF ── */}
+                {menuTab === "pdf" && (
                   <section className="space-y-5 rounded-2xl border border-[#0f5bd4]/40 bg-[#0b1424] p-4">
-                    {/* Header */}
                     <div>
-                      <h2 className="text-xl font-bold text-white">Importação em massa via PDF</h2>
+                      <h2 className="text-xl font-bold text-white">Importação em massa (PDF, Excel, Word, PowerPoint)</h2>
                       <p className="mt-1 text-xs text-[#9bb0d0]">
-                        Funciona com <strong className="text-[#8db5ff]">qualquer tipo de PDF</strong> — digital ou escaneado.
-                        Para PDFs escaneados ou sem texto, os campos ficam em branco para preenchimento manual.
+                        Os produtos importados entram com status <strong className="text-[#8fe0b8]">na vitrine</strong> e
+                        também aparecem no <strong className="text-[#8db5ff]">Cardápio Digital</strong>.
                       </p>
                     </div>
 
-                    {/* ── Configurações padrão (visível antes de carregar PDF) ── */}
                     {extractedProducts.length === 0 && (
                       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                         <div className="col-span-2">
@@ -1124,7 +1641,7 @@ export default function AdminPage() {
                             )}
                           </select>
                         </div>
-                        <div className="col-span-2 sm:col-span-2">
+                        <div className="col-span-2">
                           <label className="mb-1 block text-[10px] font-bold uppercase tracking-[0.1em] text-[#8db5ff]">
                             Unidade padrão
                           </label>
@@ -1143,66 +1660,68 @@ export default function AdminPage() {
                       </div>
                     )}
 
-                    {/* ── Upload area ── */}
                     {extractedProducts.length === 0 && (
                       <>
                         <input
                           ref={pdfInputRef}
                           type="file"
-                          accept=".pdf"
+                          accept=".pdf,.xlsx,.xls,.docx,.pptx,.doc,.ppt"
                           className="hidden"
                           onChange={async (e) => {
                             const file = e.target.files?.[0];
-                            if (file) await processPdf(file);
+                            await importFromInputFile(file);
                             if (pdfInputRef.current) pdfInputRef.current.value = "";
                           }}
                         />
-                        <button
-                          type="button"
-                          onClick={() => pdfInputRef.current?.click()}
-                          disabled={pdfProcessing}
-                          className="w-full rounded-xl border-2 border-dashed border-[#2f466d] bg-[#091426] px-4 py-10 text-center transition hover:border-[#0f5bd4] disabled:opacity-60"
+                        <div
+                          onDrop={handleImportDrop}
+                          onDragOver={handleImportDragOver}
+                          onPaste={handleImportPaste}
+                          tabIndex={0}
+                          className="w-full rounded-xl border-2 border-dashed border-[#2f466d] bg-[#091426] px-4 py-10 text-center outline-none transition hover:border-[#0f5bd4] focus:border-[#0f5bd4]"
                         >
-                          {pdfProcessing ? (
-                            <div className="space-y-2">
-                              <p className="animate-pulse text-lg text-[#8db5ff]">⏳ Processando PDF...</p>
-                              <p className="text-xs text-[#6a88af]">Renderizando páginas e extraindo conteúdo</p>
-                            </div>
-                          ) : (
-                            <div className="space-y-2">
-                              <p className="text-4xl">📄</p>
-                              <p className="text-sm font-bold text-[#d6e3f8]">Clique para selecionar o PDF</p>
-                              <p className="text-xs text-[#6a88af]">
-                                Cada página vira um produto com imagem, descrição e preço extraídos
-                              </p>
-                            </div>
-                          )}
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() => pdfInputRef.current?.click()}
+                            disabled={pdfProcessing}
+                            className="w-full"
+                          >
+                            {pdfProcessing ? (
+                              <div className="space-y-2">
+                                <p className="animate-pulse text-lg text-[#8db5ff]">⏳ Processando arquivo...</p>
+                                <p className="text-xs text-[#6a88af]">Lendo dados e montando produtos</p>
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                <p className="text-4xl">📄</p>
+                                <p className="text-sm font-bold text-[#d6e3f8]">Clique, arraste e solte, ou cole (Ctrl+V) o arquivo</p>
+                                <p className="text-xs text-[#6a88af]">Suporta PDF, Excel (.xlsx/.xls), Word (.docx) e PowerPoint (.pptx)</p>
+                              </div>
+                            )}
+                          </button>
+                        </div>
                       </>
                     )}
 
-                    {/* ── Grid compacto de thumbnails ── */}
                     {extractedProducts.length > 0 && (
                       <div className="space-y-3">
-                        {/* Hidden input for image replacement */}
                         <input ref={replaceProductImageRef} type="file" accept="image/*" className="hidden" onChange={handleReplaceProductImage} />
 
-                        {/* Barra de controles */}
                         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#2a4162] bg-[#091426] px-3 py-2">
                           <span className="text-xs font-bold text-white">
                             {extractedProducts.filter((p) => p.selected).length}/{extractedProducts.length} selecionado(s)
                           </span>
-                          <button type="button" onClick={() => setExtractedProducts((p) => p.map((x) => ({ ...x, selected: true })))}
-                            className="text-xs font-bold text-[#8db5ff] underline">Todos</button>
-                          <button type="button" onClick={() => setExtractedProducts((p) => p.map((x) => ({ ...x, selected: false })))}
-                            className="text-xs font-bold text-[#ff8c98] underline">Nenhum</button>
-                          <button type="button" onClick={() => { setCurrentImportIdx(0); setShowImportModal(true); }}
-                            className="ml-auto rounded-lg border border-[#0f5bd4] bg-[#0f5bd4]/15 px-3 py-1 text-xs font-bold text-[#8db5ff] hover:bg-[#0f5bd4]/30">
+                          <button type="button" onClick={() => setExtractedProducts((p) => p.map((x) => ({ ...x, selected: true })))} className="text-xs font-bold text-[#8db5ff] underline">Todos</button>
+                          <button type="button" onClick={() => setExtractedProducts((p) => p.map((x) => ({ ...x, selected: false })))} className="text-xs font-bold text-[#ff8c98] underline">Nenhum</button>
+                          <button
+                            type="button"
+                            onClick={() => { setCurrentImportIdx(0); setShowImportModal(true); }}
+                            className="ml-auto rounded-lg border border-[#0f5bd4] bg-[#0f5bd4]/15 px-3 py-1 text-xs font-bold text-[#8db5ff] hover:bg-[#0f5bd4]/30"
+                          >
                             ✏️ Revisar produtos
                           </button>
                         </div>
 
-                        {/* Grade de thumbnails — clique para editar no popup */}
                         <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5 max-h-72 overflow-y-auto pr-1">
                           {extractedProducts.map((prod, idx) => {
                             const priceVal = parseFloat(prod.price);
@@ -1229,15 +1748,11 @@ export default function AdminPage() {
                                     {priceOk ? `R$ ${prod.price}` : "Sem preço"}
                                   </p>
                                 </div>
-                                <div className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 transition group-hover:opacity-100">
-                                  <span className="text-xs font-bold text-white">✏️ Editar</span>
-                                </div>
                               </button>
                             );
                           })}
                         </div>
 
-                        {/* Progresso de importação */}
                         {importingProducts && (
                           <div>
                             <div className="mb-1 flex justify-between text-xs font-bold">
@@ -1245,38 +1760,42 @@ export default function AdminPage() {
                               <span className="text-white">{importProgress}%</span>
                             </div>
                             <div className="h-3 overflow-hidden rounded-full bg-[#13233f]">
-                              <div className="h-full rounded-full bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] transition-all duration-300"
-                                style={{ width: `${importProgress}%` }} />
+                              <div className="h-full rounded-full bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] transition-all duration-300" style={{ width: `${importProgress}%` }} />
                             </div>
                           </div>
                         )}
 
-                        {/* Resultado */}
                         {importResult && (
                           <div className="rounded-xl border border-[#1f8b4c]/40 bg-[#1f8b4c]/10 p-3">
                             <p className="font-bold text-[#8fe0b8]">
                               ✓ {importResult.success} produto(s) salvo(s) com sucesso
                               {importResult.error > 0 && <span className="ml-2 text-[#ff8c98]">· {importResult.error} com erro</span>}
                             </p>
-                            <button type="button"
-                              onClick={() => { setExtractedProducts([]); setImportResult(null); setShowPdfImport(false); }}
-                              className="mt-2 w-full rounded-xl border border-[#365682] bg-[#13233f] px-4 py-2 text-sm font-bold text-[#d9e7ff]">
+                            <button
+                              type="button"
+                              onClick={() => { setExtractedProducts([]); setImportResult(null); setMenuTab("lista"); }}
+                              className="mt-2 w-full rounded-xl border border-[#365682] bg-[#13233f] px-4 py-2 text-sm font-bold text-[#d9e7ff]"
+                            >
                               Fechar importação
                             </button>
                           </div>
                         )}
 
-                        {/* Botões de ação */}
                         {!importingProducts && !importResult && (
                           <div className="flex gap-2">
-                            <button type="button"
+                            <button
+                              type="button"
                               onClick={() => { setExtractedProducts([]); setImportResult(null); }}
-                              className="rounded-xl border border-[#365682] bg-[#13233f] px-4 py-3 text-sm font-bold text-[#d9e7ff]">
+                              className="rounded-xl border border-[#365682] bg-[#13233f] px-4 py-3 text-sm font-bold text-[#d9e7ff]"
+                            >
                               ← Novo PDF
                             </button>
-                            <button type="button" onClick={importProducts}
+                            <button
+                              type="button"
+                              onClick={importProducts}
                               disabled={extractedProducts.filter((p) => p.selected && p.name.trim()).length === 0}
-                              className="flex-1 rounded-xl bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] px-4 py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">
+                              className="flex-1 rounded-xl bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] px-4 py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                            >
                               📥 Salvar {extractedProducts.filter((p) => p.selected && p.name.trim()).length} produto(s) no banco
                             </button>
                           </div>
@@ -1285,349 +1804,92 @@ export default function AdminPage() {
                     )}
                   </section>
                 )}
-
-                {/* Categories */}
-                <section className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
-                  <h2 className="text-xl font-bold text-white">Categorias do cardapio</h2>
-                  <p className="mt-1 text-xs text-[#9bb0d0]">Adicione ou remova categorias usadas no cadastro de produtos.</p>
-
-                  <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                    <input
-                      value={newCategoryName}
-                      onChange={(e) => setNewCategoryName(e.target.value)}
-                      placeholder="Nova categoria"
-                      className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]"
-                    />
-                    <button
-                      type="button"
-                      onClick={addMenuCategory}
-                      className="rounded-xl bg-[#0f5bd4] px-4 py-2 font-bold text-white"
-                    >
-                      Adicionar
-                    </button>
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {categories.map((cat) => (
-                      <div key={cat} className="flex items-center gap-2 rounded-lg border border-[#2b4062] bg-[#101d33] px-3 py-2">
-                        <span className="text-xs font-bold uppercase tracking-[0.06em] text-[#d6e3f8]">{cat}</span>
-                        <button
-                          type="button"
-                          onClick={() => removeMenuCategory(cat)}
-                          className="rounded px-2 py-1 text-xs font-bold text-[#ff8c98] hover:bg-[#1a2a3f]"
-                        >
-                          Remover
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-
-                <div className={`grid gap-4 ${showProductForm ? "xl:grid-cols-[360px_1fr]" : "xl:grid-cols-1"}`}>
-                  {/* Product form */}
-                  {showProductForm && (
-                    <form
-                      onSubmit={addMenu}
-                      className="h-fit rounded-2xl border border-[#234062] bg-[#0b1424] p-4"
-                    >
-                      <h2 className="text-2xl text-white">{editingItemId ? "Editar Item" : "Novo Item"}</h2>
-                      <div className="mt-4 space-y-2">
-                        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome" required className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]" />
-                        <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Descricao" required className="h-20 w-full resize-none rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]" />
-                        <input value={price} onChange={(e) => setPrice(e.target.value)} type="number" min="0" step="0.01" placeholder="Preco (apenas referencia no cardapio)" required className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]" />
-                        <select value={category} onChange={(e) => setCategory(e.target.value as MenuCategory)} className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]">
-                          {categories.length > 0 ? (
-                            categories.map((cat) => <option key={cat}>{cat}</option>)
-                          ) : (
-                            <><option>Salgado</option><option>Lanche</option><option>Bebida</option><option>Doce</option></>
-                          )}
-                        </select>
-                        <select value={unit} onChange={(e) => setUnit(e.target.value as UnitMeasure)} className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]">
-                          <option value="un">Unidade (un)</option>
-                          <option value="kg">Quilo (kg)</option>
-                          <option value="g">Grama (g)</option>
-                          <option value="l">Litro (l)</option>
-                          <option value="ml">Mililitro (ml)</option>
-                        </select>
-                        <div onDrop={handleImageDrop} onDragOver={handleImageDragOver} className="w-full rounded-xl border-2 border-dashed border-[#2f466d] bg-[#091426] px-3 py-4 transition-colors hover:border-[#0f5bd4]">
-                          <input value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} onPaste={handleImagePaste} placeholder="Cole (Ctrl+V) ou arraste a imagem aqui" className="w-full bg-transparent text-[#eef4ff] placeholder-[#7a95bd] outline-none" />
-                          <input
-                            ref={imageFileRef}
-                            type="file"
-                            accept="image/*"
-                            onChange={handleFileChange}
-                            className="hidden"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => imageFileRef.current?.click()}
-                            className="mt-3 w-full rounded-lg border border-[#2f466d] bg-[#13233f] px-3 py-2 text-xs font-bold text-[#8db5ff] hover:bg-[#1a2f50] transition"
-                          >
-                            📁 Selecionar imagem (celular ou computador)
-                          </button>
-                          {imageUrl && (
-                            <div className="mt-2 overflow-hidden rounded-lg">
-                              <img src={imageUrl} alt="preview" className="h-20 w-auto object-cover" />
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Addons */}
-                        <div className="space-y-3">
-                          <h4 className="text-sm font-bold text-[#eef4ff]">Acompanhamentos</h4>
-                          <div className="space-y-2">
-                            {addonsList.map((addon, idx) => (
-                              <div key={idx} className="flex items-center gap-2 rounded-lg border border-[#2b4062] bg-[#101d33] p-2">
-                                <div className="flex-1 text-xs text-[#d6e3f8]">
-                                  <p className="font-bold">{addon.name}</p>
-                                  <p className="text-[#93a8c6]">{addon.description}</p>
-                                  <p className="text-[#8db5ff] font-semibold">{currency(addon.price)}</p>
-                                </div>
-                                <button type="button" onClick={() => setAddonsList(addonsList.filter((_, i) => i !== idx))} className="rounded px-2 py-1 text-xs font-bold text-[#ff8c98] hover:bg-[#1a2a3f]">✕</button>
-                              </div>
-                            ))}
-                          </div>
-                          <div className="space-y-2 rounded-lg border border-[#2f466d] bg-[#091426] p-3">
-                            <input value={newAddonName} onChange={(e) => setNewAddonName(e.target.value)} placeholder="Nome do acompanhamento" className="w-full rounded-lg border border-[#1f3a52] bg-[#0a0f1a] px-2 py-1 text-xs text-[#eef4ff]" />
-                            <input value={newAddonPrice} onChange={(e) => setNewAddonPrice(e.target.value)} placeholder="Preço" type="number" step="0.01" className="w-full rounded-lg border border-[#1f3a52] bg-[#0a0f1a] px-2 py-1 text-xs text-[#eef4ff]" />
-                            <input value={newAddonDesc} onChange={(e) => setNewAddonDesc(e.target.value)} placeholder="Descrição" className="w-full rounded-lg border border-[#1f3a52] bg-[#0a0f1a] px-2 py-1 text-xs text-[#eef4ff]" />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (newAddonName.trim() && newAddonPrice.trim()) {
-                                  setAddonsList([...addonsList, { name: newAddonName, price: Number(newAddonPrice), description: newAddonDesc }]);
-                                  setNewAddonName(""); setNewAddonPrice(""); setNewAddonDesc("");
-                                }
-                              }}
-                              className="w-full rounded-lg bg-[#0f5bd4] px-2 py-1 text-xs font-bold text-white"
-                            >
-                              + Adicionar
-                            </button>
-                          </div>
-                        </div>
-
-                        {editingItemId ? (
-                          <div className="flex gap-2">
-                            <button type="button" onClick={updateItem} className="flex-1 rounded-xl bg-[#0f5bd4] px-4 py-3 font-bold text-white">✏️ Atualizar Item</button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingItemId(null);
-                                setName(""); setDescription(""); setPrice(""); setUnit("un"); setImageUrl(""); setAddonsList([]);
-                                setNewAddonName(""); setNewAddonPrice(""); setNewAddonDesc("");
-                                setFormNotice("");
-                              }}
-                              className="flex-1 rounded-xl border border-[#2f466d] bg-[#13233f] px-4 py-3 font-bold text-[#d6e3f8]"
-                            >
-                              Cancelar
-                            </button>
-                          </div>
-                        ) : (
-                          <button type="submit" className="w-full rounded-xl bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] px-4 py-3 font-bold text-white">
-                            Cadastrar Item
-                          </button>
-                        )}
-                      </div>
-                    </form>
-                  )}
-
-                  {/* Product list */}
-                  <section className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
-                    <h2 className="text-3xl text-white mb-4">Cardápio Atual</h2>
-                    <div className="mb-4 space-y-2">
-                      <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="🔍 Pesquisar produto por nome ou descrição..." className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-4 py-3 text-[#eef4ff] placeholder:text-[#7a94b8]" />
-                      <div className="flex gap-2">
-                        <select value={searchCategory} onChange={(e) => setSearchCategory((e.target.value as MenuCategory) || "")} className="flex-1 rounded-xl border border-[#2f466d] bg-[#091426] px-4 py-2 text-[#eef4ff]">
-                          <option value="">Todas as categorias</option>
-                          {categories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
-                        </select>
-                        {(searchQuery || searchCategory) && (
-                          <button onClick={() => { setSearchQuery(""); setSearchCategory(""); }} className="rounded-xl border border-[#2f466d] bg-[#13233f] px-4 py-2 text-sm font-bold text-[#d6e3f8]">
-                            Limpar
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    <p className="mb-3 text-xs text-[#8db5ff]">{filteredMenu.length} produto(s) encontrado(s)</p>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      {filteredMenu.map((item) => (
-                        <article key={item.id} className="rounded-2xl border border-[#2a4162] bg-[#101d33] p-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <h3 className="text-xl leading-none text-white">{item.name}</h3>
-                            <span className={`text-xs font-bold uppercase tracking-[0.1em] px-2 py-1 rounded ${item.available ? "bg-[#8fe0b8]/20 text-[#8fe0b8]" : "bg-[#ff8c98]/20 text-[#ff8c98]"}`}>
-                              {item.available ? "Ativo" : "Inativo"}
-                            </span>
-                          </div>
-                          <span className="inline-block mt-2 text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">{item.category}</span>
-                          <div className="mt-2 overflow-hidden rounded-lg border border-[#2b4062] bg-[#0b1424]">
-                            <img src={item.imageUrl} alt={item.name} className="h-24 w-full object-cover" />
-                          </div>
-                          {item.addons && item.addons.length > 0 && (
-                            <p className="mt-2 text-xs text-[#97afcf]">Acompanhamentos: {item.addons.map((a) => a.name).join(", ")}</p>
-                          )}
-                          <p className="mt-2 text-sm font-bold text-[#8db5ff]">{currency(item.price)}</p>
-                          <p className="mt-1 text-xs text-[#8db5ff]">Unidade: {item.unit}</p>
-                          <div className="mt-3 flex gap-2 flex-wrap">
-                            <button onClick={() => editItem(item)} className="rounded-lg border border-[#0f5bd4] bg-[#0f5bd4]/20 px-3 py-2 text-xs font-bold text-[#0f9fff] hover:bg-[#0f5bd4]/40 transition">✏️ Editar</button>
-                            <button onClick={() => toggleAvailability(item)} className="flex-1 rounded-lg border border-[#2e476f] bg-[#13233f] px-2 py-2 text-xs font-bold text-[#d3e4ff] hover:bg-[#1a2f50] transition">
-                              {item.available ? "🔒 Desativar" : "🔓 Ativar"}
-                            </button>
-                            <button onClick={() => { setDeleteItemId(item.id); setDeleteModalOpen(true); setDeletePassword(""); }} className="rounded-lg bg-[#c81f2f] px-3 py-2 text-xs font-bold text-white hover:bg-[#b01625] transition">🗑️ Excluir</button>
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-                  </section>
-                </div>
               </div>
             )}
 
             {/* ─── CARDÁPIO DIGITAL ─── */}
             {activeSection === "cardapio" && (
               <div className="space-y-4">
-
-                {/* QR code + link card */}
-                <section className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
-                  <h2 className="text-xl font-bold text-white">QR Code do Cardápio Digital</h2>
-                  <p className="mt-1 text-xs text-[#9bb0d0]">
-                    Salve este QR no Instagram para clientes visualizarem todos os seus produtos.
-                  </p>
-                  <div className="mt-4 flex flex-col items-center gap-6 sm:flex-row sm:items-start">
-                    <div className="shrink-0">
-                      <img
-                        src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`${baseUrl}/cardapio`)}`}
-                        alt="QR Cardápio Digital"
-                        className="h-40 w-40 rounded-xl bg-white p-2 shadow-lg"
-                      />
-                    </div>
-                    <div className="w-full flex-1 space-y-3">
-                      <div>
-                        <p className="text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">Link público</p>
-                        <p className="mt-1 break-all rounded-lg border border-[#2f466d] bg-[#091426] px-3 py-2 font-mono text-sm text-[#eef4ff]">
-                          {baseUrl}/cardapio
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              await navigator.clipboard.writeText(`${baseUrl}/cardapio`);
-                              setFormNotice("Link do cardápio copiado!");
-                            } catch {
-                              setError("Não foi possível copiar o link.");
-                            }
-                          }}
-                          className="rounded-lg bg-[#0f5bd4] px-4 py-2 text-sm font-bold text-white hover:bg-[#0d4db8] transition"
-                        >
-                          📋 Copiar link
-                        </button>
-                        <a
-                          href={`${baseUrl}/cardapio`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="rounded-lg border border-[#365682] bg-[#13233f] px-4 py-2 text-sm font-bold text-[#d9e7ff] hover:bg-[#1a2f50] transition"
-                        >
-                          🔗 Abrir página
-                        </a>
-                      </div>
-                      <p className="text-xs text-[#6a88af]">
-                        Esta página exibe <strong className="text-[#8db5ff]">todos</strong> os produtos cadastrados e não possui carrinho — é só para exposição.
-                      </p>
-                    </div>
+                <div className="overflow-x-auto">
+                  <div className="flex min-w-max gap-1.5 rounded-2xl border border-[#234062] bg-[#0b1424] p-1.5">
+                    {([
+                      { id: "qrcode", label: "📱 QR Code" },
+                      { id: "vitrine", label: "⭐ Vitrine" },
+                    ] as { id: typeof cardapioTab; label: string }[]).map(({ id, label }) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setCardapioTab(id)}
+                        className={`shrink-0 rounded-xl px-4 py-2.5 text-sm font-bold transition-all ${
+                          cardapioTab === id
+                            ? "bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] text-white shadow-lg"
+                            : "text-[#8db5ff] hover:bg-[#13233f]"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
                   </div>
-                </section>
-
-                {/* Product registration toggle */}
-                <div className="flex items-center justify-between rounded-2xl border border-[#234062] bg-[#0b1424] p-3">
-                  <p className="text-sm font-bold text-[#d9e7ff]">Cadastrar produto no catálogo</p>
-                  <button
-                    type="button"
-                    onClick={() => setShowProductForm((v) => !v)}
-                    className="rounded-lg border border-[#2f466d] bg-[#13233f] px-3 py-2 text-xs font-bold text-[#d6e3f8]"
-                  >
-                    {showProductForm ? "Fechar cadastro" : "Abrir cadastro"}
-                  </button>
                 </div>
 
-                <div className={`grid gap-4 ${showProductForm ? "xl:grid-cols-[360px_1fr]" : "xl:grid-cols-1"}`}>
-                  {/* Form (shared state with Produtos section) */}
-                  {showProductForm && (
-                    <form onSubmit={addMenu} className="h-fit rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
-                      <h2 className="text-2xl text-white">{editingItemId ? "Editar Item" : "Novo Item"}</h2>
-                      <div className="mt-4 space-y-2">
-                        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome" required className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]" />
-                        <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Descricao" required className="h-20 w-full resize-none rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]" />
-                        <input value={price} onChange={(e) => setPrice(e.target.value)} type="number" min="0" step="0.01" placeholder="Preco (referencia no cardapio)" required className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]" />
-                        <select value={category} onChange={(e) => setCategory(e.target.value as MenuCategory)} className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]">
-                          {categories.length > 0 ? (
-                            categories.map((cat) => <option key={cat}>{cat}</option>)
-                          ) : (
-                            <><option>Salgado</option><option>Lanche</option><option>Bebida</option><option>Doce</option></>
-                          )}
-                        </select>
-                        <select value={unit} onChange={(e) => setUnit(e.target.value as UnitMeasure)} className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-3 py-2 text-[#eef4ff]">
-                          <option value="un">Unidade (un)</option>
-                          <option value="kg">Quilo (kg)</option>
-                          <option value="g">Grama (g)</option>
-                          <option value="l">Litro (l)</option>
-                          <option value="ml">Mililitro (ml)</option>
-                        </select>
-                        <div onDrop={handleImageDrop} onDragOver={handleImageDragOver} className="w-full rounded-xl border-2 border-dashed border-[#2f466d] bg-[#091426] px-3 py-4 transition-colors hover:border-[#0f5bd4]">
-                          <input value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} onPaste={handleImagePaste} placeholder="Cole (Ctrl+V) ou arraste a imagem aqui" className="w-full bg-transparent text-[#eef4ff] placeholder-[#7a95bd] outline-none" />
-                          <input ref={imageFileRef} type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
-                          <button type="button" onClick={() => imageFileRef.current?.click()} className="mt-3 w-full rounded-lg border border-[#2f466d] bg-[#13233f] px-3 py-2 text-xs font-bold text-[#8db5ff] hover:bg-[#1a2f50] transition">
-                            📁 Selecionar imagem (celular ou computador)
-                          </button>
-                          {imageUrl && (
-                            <div className="mt-2 overflow-hidden rounded-lg">
-                              <img src={imageUrl} alt="preview" className="h-20 w-auto object-cover" />
-                            </div>
-                          )}
-                        </div>
-                        {/* Addons */}
-                        <div className="space-y-3">
-                          <h4 className="text-sm font-bold text-[#eef4ff]">Acompanhamentos</h4>
-                          <div className="space-y-2">
-                            {addonsList.map((addon, idx) => (
-                              <div key={idx} className="flex items-center gap-2 rounded-lg border border-[#2b4062] bg-[#101d33] p-2">
-                                <div className="flex-1 text-xs text-[#d6e3f8]">
-                                  <p className="font-bold">{addon.name}</p>
-                                  <p className="text-[#93a8c6]">{addon.description}</p>
-                                  <p className="text-[#8db5ff] font-semibold">{currency(addon.price)}</p>
-                                </div>
-                                <button type="button" onClick={() => setAddonsList(addonsList.filter((_, i) => i !== idx))} className="rounded px-2 py-1 text-xs font-bold text-[#ff8c98]">✕</button>
-                              </div>
-                            ))}
-                          </div>
-                          <div className="space-y-2 rounded-lg border border-[#2f466d] bg-[#091426] p-3">
-                            <input value={newAddonName} onChange={(e) => setNewAddonName(e.target.value)} placeholder="Nome do acompanhamento" className="w-full rounded-lg border border-[#1f3a52] bg-[#0a0f1a] px-2 py-1 text-xs text-[#eef4ff]" />
-                            <input value={newAddonPrice} onChange={(e) => setNewAddonPrice(e.target.value)} placeholder="Preço" type="number" step="0.01" className="w-full rounded-lg border border-[#1f3a52] bg-[#0a0f1a] px-2 py-1 text-xs text-[#eef4ff]" />
-                            <input value={newAddonDesc} onChange={(e) => setNewAddonDesc(e.target.value)} placeholder="Descrição" className="w-full rounded-lg border border-[#1f3a52] bg-[#0a0f1a] px-2 py-1 text-xs text-[#eef4ff]" />
-                            <button type="button" onClick={() => { if (newAddonName.trim() && newAddonPrice.trim()) { setAddonsList([...addonsList, { name: newAddonName, price: Number(newAddonPrice), description: newAddonDesc }]); setNewAddonName(""); setNewAddonPrice(""); setNewAddonDesc(""); } }} className="w-full rounded-lg bg-[#0f5bd4] px-2 py-1 text-xs font-bold text-white">+ Adicionar</button>
-                          </div>
-                        </div>
-                        {editingItemId ? (
-                          <div className="flex gap-2">
-                            <button type="button" onClick={updateItem} className="flex-1 rounded-xl bg-[#0f5bd4] px-4 py-3 font-bold text-white">✏️ Atualizar Item</button>
-                            <button type="button" onClick={() => { setEditingItemId(null); setName(""); setDescription(""); setPrice(""); setUnit("un"); setImageUrl(""); setAddonsList([]); setNewAddonName(""); setNewAddonPrice(""); setNewAddonDesc(""); setFormNotice(""); }} className="flex-1 rounded-xl border border-[#2f466d] bg-[#13233f] px-4 py-3 font-bold text-[#d6e3f8]">Cancelar</button>
-                          </div>
-                        ) : (
-                          <button type="submit" className="w-full rounded-xl bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] px-4 py-3 font-bold text-white">Cadastrar Item</button>
-                        )}
+                {cardapioTab === "qrcode" && (
+                  <section className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
+                    <h2 className="text-xl font-bold text-white">QR Code do Cardápio Digital</h2>
+                    <p className="mt-1 text-xs text-[#9bb0d0]">
+                      Esta página exibe todos os produtos cadastrados, inclusive os importados por PDF.
+                    </p>
+                    <div className="mt-4 flex flex-col items-center gap-6 sm:flex-row sm:items-start">
+                      <div className="shrink-0">
+                        <img
+                          src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`${baseUrl}/cardapio`)}`}
+                          alt="QR Cardápio Digital"
+                          className="h-40 w-40 rounded-xl bg-white p-2 shadow-lg"
+                        />
                       </div>
-                    </form>
-                  )}
+                      <div className="w-full flex-1 space-y-3">
+                        <div>
+                          <p className="text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">Link público</p>
+                          <p className="mt-1 break-all rounded-lg border border-[#2f466d] bg-[#091426] px-3 py-2 font-mono text-sm text-[#eef4ff]">
+                            {baseUrl}/cardapio
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await navigator.clipboard.writeText(`${baseUrl}/cardapio`);
+                                setFormNotice("Link do cardápio copiado!");
+                              } catch {
+                                setError("Não foi possível copiar o link.");
+                              }
+                            }}
+                            className="rounded-lg bg-[#0f5bd4] px-4 py-2 text-sm font-bold text-white hover:bg-[#0d4db8] transition"
+                          >
+                            📋 Copiar link
+                          </button>
+                          <a
+                            href={`${baseUrl}/cardapio`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="rounded-lg border border-[#365682] bg-[#13233f] px-4 py-2 text-sm font-bold text-[#d9e7ff] hover:bg-[#1a2f50] transition"
+                          >
+                            🔗 Abrir página
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+                )}
 
-                  {/* All products with vitrine toggle */}
+                {cardapioTab === "vitrine" && (
                   <section className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
                     <div className="mb-4 flex items-center justify-between">
                       <h2 className="text-2xl font-bold text-white">Todos os produtos</h2>
                       <span className="text-xs font-bold text-[#8db5ff]">{menu.length} produto(s)</span>
                     </div>
                     <p className="mb-4 text-xs text-[#9bb0d0]">
-                      <span className="font-bold text-[#8fe0b8]">Na vitrine</span> = aparece no cardápio de pedidos das mesas. &nbsp;
-                      <span className="font-bold text-[#8db5ff]">Só no catálogo</span> = exibido apenas na página do cardápio digital.
+                      <span className="font-bold text-[#8fe0b8]">Na vitrine</span> = aparece no cardápio de pedidos das mesas. <span className="font-bold text-[#8db5ff]">Só no catálogo</span> = aparece apenas na página digital.
                     </p>
                     <div className="grid gap-3 md:grid-cols-2">
                       {menu.map((item) => (
@@ -1646,13 +1908,9 @@ export default function AdminPage() {
                               <p className="text-xs font-bold text-[#8db5ff]">{currency(item.price)}</p>
                             </div>
                           </div>
-
-                          {/* Vitrine status + toggle */}
                           <div className="mt-3 flex items-center justify-between gap-2">
                             <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${
-                              item.available
-                                ? "bg-[#8fe0b8]/20 text-[#8fe0b8]"
-                                : "bg-[#8db5ff]/15 text-[#8db5ff]"
+                              item.available ? "bg-[#8fe0b8]/20 text-[#8fe0b8]" : "bg-[#8db5ff]/15 text-[#8db5ff]"
                             }`}>
                               {item.available ? "✓ Na vitrine" : "Só no catálogo"}
                             </span>
@@ -1667,11 +1925,9 @@ export default function AdminPage() {
                               {item.available ? "Remover da vitrine" : "Adicionar à vitrine"}
                             </button>
                           </div>
-
-                          {/* CRUD actions */}
                           <div className="mt-2 flex gap-2">
                             <button
-                              onClick={() => { editItem(item); }}
+                              onClick={() => editItem(item)}
                               className="flex-1 rounded-lg border border-[#0f5bd4] bg-[#0f5bd4]/20 px-2 py-1.5 text-xs font-bold text-[#0f9fff] hover:bg-[#0f5bd4]/40 transition"
                             >
                               ✏️ Editar
@@ -1686,13 +1942,11 @@ export default function AdminPage() {
                         </article>
                       ))}
                       {menu.length === 0 && (
-                        <p className="col-span-2 py-8 text-center text-sm text-[#93a8c6]">
-                          Nenhum produto cadastrado ainda.
-                        </p>
+                        <p className="col-span-2 py-8 text-center text-sm text-[#93a8c6]">Nenhum produto cadastrado ainda.</p>
                       )}
                     </div>
                   </section>
-                </div>
+                )}
               </div>
             )}
 
@@ -1957,6 +2211,15 @@ export default function AdminPage() {
         if (!prod) return null;
         const update = (patch: Partial<ExtractedProduct>) =>
           setExtractedProducts((prev) => prev.map((p) => (p.id === prod.id ? { ...p, ...patch } : p)));
+        const setImageFromFile = (file?: File) => {
+          if (!file || !file.type.startsWith("image/")) return;
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const result = e.target?.result as string;
+            if (result) update({ imageUrl: result });
+          };
+          reader.readAsDataURL(file);
+        };
         const priceVal = parseFloat(prod.price);
         const priceOk = !isNaN(priceVal) && priceVal > 0;
         const selectedCount = extractedProducts.filter((p) => p.selected && p.name.trim()).length;
@@ -1985,6 +2248,20 @@ export default function AdminPage() {
                   <button
                     type="button"
                     onClick={() => { setReplacingImageProductId(prod.id); replaceProductImageRef.current?.click(); }}
+                    onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const file = e.dataTransfer.files?.[0];
+                      setImageFromFile(file);
+                    }}
+                    onPaste={(e) => {
+                      const file = e.clipboardData.files?.[0];
+                      if (!file) return;
+                      e.preventDefault();
+                      setImageFromFile(file);
+                    }}
+                    tabIndex={0}
                     className="group relative h-52 w-full overflow-hidden rounded-xl border-2 border-dashed border-[#2f466d] bg-[#091426] hover:border-[#0f5bd4] transition"
                   >
                     {prod.imageUrl ? (
@@ -2001,7 +2278,7 @@ export default function AdminPage() {
                       </div>
                     </div>
                   </button>
-                  <p className="mt-1 text-center text-[10px] text-[#5a7aaa]">Clique na imagem para substituir por arquivo do celular ou computador</p>
+                  <p className="mt-1 text-center text-[10px] text-[#5a7aaa]">Clique, arraste e solte ou cole (Ctrl+V) para substituir a imagem</p>
                 </div>
 
                 {/* Nome */}
