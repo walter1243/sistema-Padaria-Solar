@@ -2343,13 +2343,31 @@ export default function AdminPage() {
                     const summary = tableSummaries.find((t) => t.tableId === tableId);
                     const isOccupied = Boolean(summary && summary.count > 0);
                     const isCashierQuickTable = tableId === "11";
+                    const quickOrderCount = summary?.count || 0;
+                    const showOccupied = isCashierQuickTable ? false : isOccupied;
 
                     return (
                       <article key={tableId} className="rounded-2xl border border-[#2a4162] bg-[#101d33] p-3">
                         <div className="flex items-center justify-between">
                           <h3 className="text-xl text-white">Mesa {tableId}</h3>
-                          <span className={`text-xs font-bold ${isOccupied ? "text-[#ff8c98]" : "text-[#8fe0b8]"}`}>
-                            {isOccupied ? "Ocupada" : "Livre"}
+                          {isCashierQuickTable && quickOrderCount > 0 ? (
+                            <span className="inline-flex items-center gap-2">
+                              <span className="inline-flex h-7 min-w-7 items-center justify-center rounded-full bg-[#ff4d6d] px-2 text-xs font-black text-white shadow-[0_0_18px_rgba(255,77,109,0.65)] animate-bounce">
+                                {quickOrderCount}
+                              </span>
+                              <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#ff8c98]">Pedido</span>
+                            </span>
+                          ) : (
+                            <span className={`text-xs font-bold ${showOccupied ? "text-[#ff8c98]" : "text-[#8fe0b8]"}`}>
+                              {isCashierQuickTable ? "Autoatendimento" : showOccupied ? "Ocupada" : "Livre"}
+                            </span>
+                          )}
+                          <span className="sr-only">
+                            {isCashierQuickTable
+                              ? `Mesa de autoatendimento com ${quickOrderCount} pedido(s)`
+                              : showOccupied
+                              ? "Mesa ocupada"
+                              : "Mesa livre"}
                           </span>
                         </div>
 
@@ -2390,7 +2408,7 @@ export default function AdminPage() {
                           Ver detalhes
                         </button>
 
-                        {isOccupied && (
+                        {showOccupied && (
                           <button
                             onClick={() => releaseTable(tableId)}
                             className="mt-2 w-full rounded-lg bg-[#1f8b4c] px-2 py-2 text-xs font-bold text-white hover:bg-[#18703d] transition"
