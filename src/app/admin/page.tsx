@@ -30,6 +30,16 @@ type ProductDraft = {
   addonsList: Addon[];
 };
 
+type ExtractedProduct = {
+  id: string;
+  selected: boolean;
+  name: string;
+  description: string;
+  price: string;
+  category: string;
+  imageUrl: string;
+};
+
 function currency(value: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
 }
@@ -103,6 +113,14 @@ export default function AdminPage() {
   const [orderTableFilter, setOrderTableFilter] = useState("");
 
   const imageFileRef = useRef<HTMLInputElement>(null);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
+
+  const [showPdfImport, setShowPdfImport] = useState(false);
+  const [pdfProcessing, setPdfProcessing] = useState(false);
+  const [extractedProducts, setExtractedProducts] = useState<ExtractedProduct[]>([]);
+  const [importingProducts, setImportingProducts] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
+  const [importResult, setImportResult] = useState<{ success: number; error: number } | null>(null);
 
   async function loadData() {
     const [menuRes, ordersRes, categoriesRes, bakerRes, adminRes, tablesRes] = await Promise.all([
@@ -290,6 +308,170 @@ export default function AdminPage() {
       convertImageToDataUrl(file);
     }
     if (imageFileRef.current) imageFileRef.current.value = "";
+  }
+
+  async function processPdf(file: File) {
+    setPdfProcessing(true);
+    setExtractedProducts([]);
+    setImportResult(null);
+    setError("");
+    try {
+      const pdfjsLib = await import("pdfjs-dist");
+      pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+      const allProducts: ExtractedProduct[] = [];
+
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        const page = await pdf.getPage(pageNum);
+
+        // Render page to canvas for product image
+        const viewport = page.getViewport({ scale: 0.8 });
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await page.render({ canvasContext: ctx as unknown as any, viewport }).promise;
+        }
+        const pageImage = canvas.toDataURL("image/jpeg", 0.55);
+
+        // Extract text
+        const textContent = await page.getTextContent();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const rawItems = (textContent.items as any[])
+          .filter((i) => typeof i.str === "string" && i.str.trim())
+          .map((i) => ({ str: i.str as string, x: i.transform[4] as number, y: i.transform[5] as number }));
+
+        rawItems.sort((a, b) => {
+          const dy = b.y - a.y;
+          return Math.abs(dy) > 3 ? dy : a.x - b.x;
+        });
+
+        // Group into lines
+        const lines: string[] = [];
+        let lineY = -9999;
+        let parts: string[] = [];
+        for (const item of rawItems) {
+          if (Math.abs(item.y - lineY) <= 3) {
+            parts.push(item.str);
+          } else {
+            const joined = parts.join(" ").trim();
+            if (joined) lines.push(joined);
+            parts = [item.str];
+            lineY = item.y;
+          }
+        }
+        const lastJoined = parts.join(" ").trim();
+        if (lastJoined) lines.push(lastJoined);
+
+        // Parse products — price pattern anchors each product
+        const priceRe = /R\$\s*(\d{1,6})[,.](\d{2})/;
+        let buf = { name: "", desc: "" };
+        for (const line of lines) {
+          const m = line.match(priceRe);
+          if (m) {
+            const priceVal = `${m[1]}.${m[2]}`;
+            if (buf.name) {
+              allProducts.push({
+                id: crypto.randomUUID(),
+                selected: true,
+                name: buf.name,
+                description: buf.desc || buf.name,
+                price: priceVal,
+                category: categories[0] || "Salgado",
+                imageUrl: pageImage,
+              });
+            }
+            buf = { name: "", desc: "" };
+          } else if (!buf.name) {
+            buf.name = line;
+          } else if (!buf.desc) {
+            buf.desc = line;
+          } else {
+            buf.desc += " " + line;
+          }
+        }
+        // Product at end of page without price
+        if (buf.name) {
+          allProducts.push({
+            id: crypto.randomUUID(),
+            selected: true,
+            name: buf.name,
+            description: buf.desc || buf.name,
+            price: "0",
+            category: categories[0] || "Salgado",
+            imageUrl: pageImage,
+          });
+        }
+      }
+
+      if (allProducts.length === 0) {
+        setError("Nenhum produto encontrado. Verifique se o PDF contém texto selecionável (não é imagem escaneada).");
+      } else {
+        setExtractedProducts(allProducts);
+        setFormNotice(`${allProducts.length} produto(s) extraído(s). Revise os dados antes de importar.`);
+      }
+    } catch (e) {
+      setError("Erro ao processar PDF: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setPdfProcessing(false);
+    }
+  }
+
+  async function importProducts() {
+    const toImport = extractedProducts.filter((p) => p.selected && p.name.trim());
+    if (toImport.length === 0) {
+      setError("Nenhum produto selecionado para importar.");
+      return;
+    }
+    setImportingProducts(true);
+    setImportProgress(0);
+    setImportResult(null);
+    setError("");
+
+    const products = toImport.map((p) => ({
+      name: p.name.trim(),
+      description: (p.description || p.name).trim(),
+      price: Math.max(parseFloat(p.price) || 0.01, 0.01),
+      category: p.category || categories[0] || "Salgado",
+      unit: "un",
+      imageUrl: p.imageUrl,
+      available: true,
+    }));
+
+    // Fake progress while calling bulk endpoint
+    const progressInterval = setInterval(() => {
+      setImportProgress((v) => Math.min(v + 5, 90));
+    }, 200);
+
+    try {
+      const res = await fetch("/api/menu/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ products }),
+      });
+      clearInterval(progressInterval);
+      setImportProgress(100);
+
+      if (!res.ok) {
+        const payload = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(payload.error || "Erro ao importar produtos.");
+        setImportingProducts(false);
+        return;
+      }
+
+      const data = (await res.json()) as { success: number; errors: number };
+      setImportResult({ success: data.success, error: data.errors });
+      if (data.success > 0) loadData();
+    } catch (e) {
+      clearInterval(progressInterval);
+      setError("Erro de conexão: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setImportingProducts(false);
+    }
   }
 
   const convertImageToDataUrl = (file: File) => {
@@ -751,16 +933,284 @@ export default function AdminPage() {
             {/* ─── MENU ─── */}
             {activeSection === "menu" && (
               <div className="space-y-4">
-                <div className="flex items-center justify-between rounded-2xl border border-[#234062] bg-[#0b1424] p-3">
-                  <p className="text-sm font-bold text-[#d9e7ff]">Cadastro de produtos</p>
+                <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-[#234062] bg-[#0b1424] p-3">
+                  <p className="flex-1 text-sm font-bold text-[#d9e7ff]">Cadastro de produtos</p>
                   <button
                     type="button"
-                    onClick={() => setShowProductForm((v) => !v)}
+                    onClick={() => { setShowPdfImport(false); setShowProductForm((v) => !v); }}
                     className="rounded-lg border border-[#2f466d] bg-[#13233f] px-3 py-2 text-xs font-bold text-[#d6e3f8]"
                   >
-                    {showProductForm ? "Fechar cadastro" : "Abrir cadastro"}
+                    {showProductForm && !showPdfImport ? "Fechar cadastro" : "Abrir cadastro"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setShowProductForm(false); setShowPdfImport((v) => !v); }}
+                    className={`rounded-lg px-3 py-2 text-xs font-bold transition ${
+                      showPdfImport
+                        ? "bg-[#0f5bd4] text-white"
+                        : "border border-[#0f5bd4] bg-[#0f5bd4]/15 text-[#8db5ff] hover:bg-[#0f5bd4]/30"
+                    }`}
+                  >
+                    📥 Importar via PDF
                   </button>
                 </div>
+
+                {/* ── PDF Import Panel ── */}
+                {showPdfImport && (
+                  <section className="rounded-2xl border border-[#0f5bd4]/40 bg-[#0b1424] p-4">
+                    <h2 className="text-xl font-bold text-white">Importação em massa via PDF</h2>
+                    <p className="mt-1 text-xs text-[#9bb0d0]">
+                      Faça upload de um PDF de cardápio. O sistema extrai nome, descrição e preço de cada produto automaticamente.
+                    </p>
+
+                    {/* Upload area */}
+                    <div className="mt-4">
+                      <input
+                        ref={pdfInputRef}
+                        type="file"
+                        accept=".pdf"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (file) await processPdf(file);
+                          if (pdfInputRef.current) pdfInputRef.current.value = "";
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => pdfInputRef.current?.click()}
+                        disabled={pdfProcessing}
+                        className="w-full rounded-xl border-2 border-dashed border-[#2f466d] bg-[#091426] px-4 py-10 text-center transition hover:border-[#0f5bd4] disabled:opacity-60"
+                      >
+                        {pdfProcessing ? (
+                          <div className="space-y-2">
+                            <p className="animate-pulse text-lg text-[#8db5ff]">⏳ Lendo PDF...</p>
+                            <p className="text-xs text-[#6a88af]">Extraindo texto e imagens das páginas</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <p className="text-3xl">📄</p>
+                            <p className="text-sm font-bold text-[#d6e3f8]">Clique para selecionar o PDF</p>
+                            <p className="text-xs text-[#6a88af]">
+                              O sistema identifica nome, descrição e preço (R$) em cada página
+                            </p>
+                          </div>
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Preview of extracted products */}
+                    {extractedProducts.length > 0 && (
+                      <div className="mt-6">
+                        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                          <h3 className="text-base font-bold text-white">
+                            Preview — {extractedProducts.filter((p) => p.selected).length} de{" "}
+                            {extractedProducts.length} produto(s) selecionado(s)
+                          </h3>
+                          <div className="flex gap-3">
+                            <button
+                              type="button"
+                              onClick={() => setExtractedProducts((prev) => prev.map((p) => ({ ...p, selected: true })))}
+                              className="text-xs font-bold text-[#8db5ff] underline"
+                            >
+                              Todos
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setExtractedProducts((prev) => prev.map((p) => ({ ...p, selected: false })))}
+                              className="text-xs font-bold text-[#ff8c98] underline"
+                            >
+                              Nenhum
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="max-h-[540px] space-y-3 overflow-y-auto pr-1">
+                          {extractedProducts.map((prod) => {
+                            const priceVal = parseFloat(prod.price);
+                            const priceOk = !isNaN(priceVal) && priceVal > 0;
+                            return (
+                              <div
+                                key={prod.id}
+                                className={`rounded-xl border p-3 transition ${
+                                  prod.selected
+                                    ? "border-[#2a4162] bg-[#101d33]"
+                                    : "border-[#1a2a40] bg-[#080f1c] opacity-50"
+                                }`}
+                              >
+                                <div className="flex gap-3">
+                                  {/* Checkbox */}
+                                  <input
+                                    type="checkbox"
+                                    checked={prod.selected}
+                                    onChange={(e) =>
+                                      setExtractedProducts((prev) =>
+                                        prev.map((p) =>
+                                          p.id === prod.id ? { ...p, selected: e.target.checked } : p,
+                                        ),
+                                      )
+                                    }
+                                    className="mt-1 h-4 w-4 shrink-0 accent-[#0f5bd4]"
+                                  />
+                                  {/* Thumbnail */}
+                                  <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-[#2b4062] bg-[#0b1424]">
+                                    <img
+                                      src={prod.imageUrl}
+                                      alt=""
+                                      className="h-full w-full object-cover"
+                                    />
+                                  </div>
+                                  {/* Fields */}
+                                  <div className="min-w-0 flex-1 space-y-2">
+                                    <input
+                                      value={prod.name}
+                                      onChange={(e) =>
+                                        setExtractedProducts((prev) =>
+                                          prev.map((p) =>
+                                            p.id === prod.id ? { ...p, name: e.target.value } : p,
+                                          ),
+                                        )
+                                      }
+                                      placeholder="Nome do produto"
+                                      className="w-full rounded-lg border border-[#2f466d] bg-[#091426] px-2 py-1.5 text-xs text-[#eef4ff]"
+                                    />
+                                    <input
+                                      value={prod.description}
+                                      onChange={(e) =>
+                                        setExtractedProducts((prev) =>
+                                          prev.map((p) =>
+                                            p.id === prod.id ? { ...p, description: e.target.value } : p,
+                                          ),
+                                        )
+                                      }
+                                      placeholder="Descrição"
+                                      className="w-full rounded-lg border border-[#2f466d] bg-[#091426] px-2 py-1.5 text-xs text-[#eef4ff]"
+                                    />
+                                    <div className="flex gap-2">
+                                      {/* Price */}
+                                      <div className="relative w-28 shrink-0">
+                                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-[#8db5ff]">
+                                          R$
+                                        </span>
+                                        <input
+                                          value={prod.price}
+                                          onChange={(e) =>
+                                            setExtractedProducts((prev) =>
+                                              prev.map((p) =>
+                                                p.id === prod.id ? { ...p, price: e.target.value } : p,
+                                              ),
+                                            )
+                                          }
+                                          placeholder="0,00"
+                                          className={`w-full rounded-lg border bg-[#091426] py-1.5 pl-7 pr-2 text-xs text-[#eef4ff] ${
+                                            priceOk ? "border-[#2f466d]" : "border-[#c81f2f]"
+                                          }`}
+                                        />
+                                      </div>
+                                      {/* Category */}
+                                      <select
+                                        value={prod.category}
+                                        onChange={(e) =>
+                                          setExtractedProducts((prev) =>
+                                            prev.map((p) =>
+                                              p.id === prod.id ? { ...p, category: e.target.value } : p,
+                                            ),
+                                          )
+                                        }
+                                        className="flex-1 rounded-lg border border-[#2f466d] bg-[#091426] px-2 py-1.5 text-xs text-[#eef4ff]"
+                                      >
+                                        {categories.length > 0 ? (
+                                          categories.map((cat) => (
+                                            <option key={cat} value={cat}>
+                                              {cat}
+                                            </option>
+                                          ))
+                                        ) : (
+                                          <>
+                                            <option value="Salgado">Salgado</option>
+                                            <option value="Lanche">Lanche</option>
+                                            <option value="Bebida">Bebida</option>
+                                            <option value="Doce">Doce</option>
+                                          </>
+                                        )}
+                                      </select>
+                                      {/* Remove */}
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setExtractedProducts((prev) => prev.filter((p) => p.id !== prod.id))
+                                        }
+                                        className="rounded-lg bg-[#c81f2f] px-2 py-1.5 text-xs font-bold text-white"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                    {!priceOk && (
+                                      <p className="text-[10px] font-semibold text-[#ff8c98]">
+                                        ⚠ Defina um preço maior que 0
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Progress bar */}
+                        {importingProducts && (
+                          <div className="mt-5">
+                            <div className="mb-1 flex justify-between text-xs font-bold">
+                              <span className="text-[#8db5ff]">Importando produtos...</span>
+                              <span className="text-white">{importProgress}%</span>
+                            </div>
+                            <div className="h-2.5 overflow-hidden rounded-full bg-[#13233f]">
+                              <div
+                                className="h-full rounded-full bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] transition-all duration-300"
+                                style={{ width: `${importProgress}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Result */}
+                        {importResult && (
+                          <div className="mt-4 rounded-xl border border-[#1f8b4c]/40 bg-[#1f8b4c]/10 p-4">
+                            <p className="font-bold text-[#8fe0b8]">
+                              ✓ {importResult.success} produto(s) cadastrado(s) com sucesso
+                              {importResult.error > 0 && (
+                                <span className="ml-2 text-[#ff8c98]">· {importResult.error} com erro</span>
+                              )}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setExtractedProducts([]);
+                                setImportResult(null);
+                                setShowPdfImport(false);
+                              }}
+                              className="mt-3 w-full rounded-xl border border-[#365682] bg-[#13233f] px-4 py-3 text-sm font-bold text-[#d9e7ff]"
+                            >
+                              Fechar importação
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Import button */}
+                        {!importingProducts && !importResult && (
+                          <button
+                            type="button"
+                            onClick={importProducts}
+                            disabled={extractedProducts.filter((p) => p.selected).length === 0}
+                            className="mt-4 w-full rounded-xl bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] px-4 py-3 font-bold text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            📥 Cadastrar {extractedProducts.filter((p) => p.selected).length} produto(s) no banco
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </section>
+                )}
 
                 {/* Categories */}
                 <section className="rounded-2xl border border-[#234062] bg-[#0b1424] p-4">
