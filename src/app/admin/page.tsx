@@ -457,8 +457,11 @@ export default function AdminPage() {
 
         // ── 4. Parse products — price anchors each block ──────────────────
         // Accepts: R$ 12,90 | R$ 1.290,00 | R$12,90
+        // ── 4-5. Defaults + parse products ──────────────────────────────
+        const defaultCat = importDefaultCategory || categories[0] || "Salgado";
+        const defaultUnit = importDefaultUnit || "un";
+
         const priceRe = /R\$\s*([\d]{1,3}(?:[.][\d]{3})*)[,]([\d]{2})/;
-        // Skip separator/decorative lines
         const skipRe = /^[-_=•·*]{2,}$|^\d+$|^página\s*\d+$/i;
 
         let buf = { name: "", desc: "" };
@@ -477,7 +480,8 @@ export default function AdminPage() {
                 name: buf.name.trim(),
                 description: (buf.desc || buf.name).trim().slice(0, 220),
                 price,
-                category: categories[0] || "Salgado",
+                unit: defaultUnit,
+                category: defaultCat,
                 imageUrl: "",
               });
             }
@@ -497,14 +501,11 @@ export default function AdminPage() {
             name: buf.name.trim(),
             description: (buf.desc || buf.name).trim().slice(0, 220),
             price: "0",
-            category: categories[0] || "Salgado",
+            unit: defaultUnit,
+            category: defaultCat,
             imageUrl: "",
           });
         }
-
-        // ── 5. Assign best image + defaults to each product ──────────────
-        const defaultCat = importDefaultCategory || categories[0] || "Salgado";
-        const defaultUnit = importDefaultUnit || "un";
 
         // For scanned/image PDFs with no text: add one empty product per page
         // so the user can fill in details manually (image is the page render).
@@ -522,8 +523,6 @@ export default function AdminPage() {
         }
 
         for (let pi = 0; pi < pageProducts.length; pi++) {
-          pageProducts[pi].unit = defaultUnit;
-          pageProducts[pi].category = defaultCat;
           if (embeddedImages.length > 0) {
             pageProducts[pi].imageUrl = embeddedImages[Math.min(pi, embeddedImages.length - 1)];
           } else {
