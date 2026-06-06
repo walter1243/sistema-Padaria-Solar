@@ -316,8 +316,23 @@ export default function AdminPage() {
     setImportResult(null);
     setError("");
     try {
-      const pdfjsLib = await import("pdfjs-dist");
-      pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+      // Load pdfjs from CDN at runtime — avoids webpack bundling the library
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pdfjsLib: any = await new Promise((resolve, reject) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const w = window as any;
+        if (w.pdfjsLib) { resolve(w.pdfjsLib); return; }
+        const script = document.createElement("script");
+        script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+        script.async = true;
+        script.onload = () => {
+          w.pdfjsLib.GlobalWorkerOptions.workerSrc =
+            "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+          resolve(w.pdfjsLib);
+        };
+        script.onerror = () => reject(new Error("Falha ao carregar biblioteca PDF. Verifique sua conexão."));
+        document.head.appendChild(script);
+      });
 
       const arrayBuffer = await file.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
@@ -326,19 +341,16 @@ export default function AdminPage() {
       for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
         const page = await pdf.getPage(pageNum);
 
-        // Render page to canvas for product image
+        // Render page to canvas for thumbnail
         const viewport = page.getViewport({ scale: 0.8 });
         const canvas = document.createElement("canvas");
         canvas.width = Math.floor(viewport.width);
         canvas.height = Math.floor(viewport.height);
         const ctx = canvas.getContext("2d");
-        if (ctx) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await page.render({ canvasContext: ctx as unknown as any, viewport }).promise;
-        }
+        if (ctx) await page.render({ canvasContext: ctx, viewport }).promise;
         const pageImage = canvas.toDataURL("image/jpeg", 0.55);
 
-        // Extract text
+        // Extract text with position info
         const textContent = await page.getTextContent();
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const rawItems = (textContent.items as any[])
@@ -350,7 +362,7 @@ export default function AdminPage() {
           return Math.abs(dy) > 3 ? dy : a.x - b.x;
         });
 
-        // Group into lines
+        // Group chars into lines
         const lines: string[] = [];
         let lineY = -9999;
         let parts: string[] = [];
@@ -367,20 +379,19 @@ export default function AdminPage() {
         const lastJoined = parts.join(" ").trim();
         if (lastJoined) lines.push(lastJoined);
 
-        // Parse products — price pattern anchors each product
+        // Parse products — R$ price pattern anchors each product block
         const priceRe = /R\$\s*(\d{1,6})[,.](\d{2})/;
         let buf = { name: "", desc: "" };
         for (const line of lines) {
           const m = line.match(priceRe);
           if (m) {
-            const priceVal = `${m[1]}.${m[2]}`;
             if (buf.name) {
               allProducts.push({
                 id: crypto.randomUUID(),
                 selected: true,
                 name: buf.name,
                 description: buf.desc || buf.name,
-                price: priceVal,
+                price: `${m[1]}.${m[2]}`,
                 category: categories[0] || "Salgado",
                 imageUrl: pageImage,
               });
@@ -394,7 +405,6 @@ export default function AdminPage() {
             buf.desc += " " + line;
           }
         }
-        // Product at end of page without price
         if (buf.name) {
           allProducts.push({
             id: crypto.randomUUID(),
