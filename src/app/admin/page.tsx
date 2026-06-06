@@ -126,6 +126,8 @@ export default function AdminPage() {
   const [importDefaultCategory, setImportDefaultCategory] = useState("");
   const [importDefaultUnit, setImportDefaultUnit] = useState("un");
   const [replacingImageProductId, setReplacingImageProductId] = useState<string | null>(null);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [currentImportIdx, setCurrentImportIdx] = useState(0);
 
   async function loadData() {
     const [menuRes, ordersRes, categoriesRes, bakerRes, adminRes, tablesRes] = await Promise.all([
@@ -537,11 +539,12 @@ export default function AdminPage() {
         setError("Nenhum conteúdo encontrado. Verifique se o PDF tem pelo menos uma página.");
       } else {
         setExtractedProducts(allProducts);
-        const textCount = allProducts.filter((p) => p.name).length;
-        const emptyCount = allProducts.length - textCount;
+        setCurrentImportIdx(0);
+        setShowImportModal(true);
+        const emptyCount = allProducts.filter((p) => !p.name).length;
         setFormNotice(
           `${allProducts.length} produto(s) extraído(s).` +
-          (emptyCount > 0 ? ` ${emptyCount} página(s) sem texto — preencha manualmente.` : " Revise antes de importar."),
+          (emptyCount > 0 ? ` ${emptyCount} sem texto detectado — preencha manualmente.` : ""),
         );
       }
     } catch (e) {
@@ -1178,237 +1181,102 @@ export default function AdminPage() {
                       </>
                     )}
 
-                    {/* ── Preview dos produtos extraídos ── */}
+                    {/* ── Grid compacto de thumbnails ── */}
                     {extractedProducts.length > 0 && (
-                      <div className="space-y-4">
-                        {/* Controls bar */}
-                        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[#2a4162] bg-[#091426] p-3">
+                      <div className="space-y-3">
+                        {/* Hidden input for image replacement */}
+                        <input ref={replaceProductImageRef} type="file" accept="image/*" className="hidden" onChange={handleReplaceProductImage} />
+
+                        {/* Barra de controles */}
+                        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#2a4162] bg-[#091426] px-3 py-2">
                           <span className="text-xs font-bold text-white">
                             {extractedProducts.filter((p) => p.selected).length}/{extractedProducts.length} selecionado(s)
                           </span>
-                          <div className="flex gap-2">
-                            <button type="button" onClick={() => setExtractedProducts((p) => p.map((x) => ({ ...x, selected: true })))}
-                              className="text-xs font-bold text-[#8db5ff] underline">Todos</button>
-                            <button type="button" onClick={() => setExtractedProducts((p) => p.map((x) => ({ ...x, selected: false })))}
-                              className="text-xs font-bold text-[#ff8c98] underline">Nenhum</button>
-                          </div>
-                          {/* Aplicar categoria/unidade a todos */}
-                          <div className="ml-auto flex flex-wrap gap-2">
-                            <select
-                              defaultValue=""
-                              onChange={(e) => {
-                                if (!e.target.value) return;
-                                setExtractedProducts((p) => p.map((x) => ({ ...x, category: e.target.value })));
-                                e.target.value = "";
-                              }}
-                              className="rounded-lg border border-[#2f466d] bg-[#0b1424] px-2 py-1 text-[10px] text-[#8db5ff]"
-                            >
-                              <option value="">Aplicar categoria a todos…</option>
-                              {(categories.length > 0 ? categories : ["Salgado","Lanche","Bebida","Doce"]).map((c) => (
-                                <option key={c} value={c}>{c}</option>
-                              ))}
-                            </select>
-                            <select
-                              defaultValue=""
-                              onChange={(e) => {
-                                if (!e.target.value) return;
-                                setExtractedProducts((p) => p.map((x) => ({ ...x, unit: e.target.value })));
-                                e.target.value = "";
-                              }}
-                              className="rounded-lg border border-[#2f466d] bg-[#0b1424] px-2 py-1 text-[10px] text-[#8db5ff]"
-                            >
-                              <option value="">Aplicar unidade a todos…</option>
-                              <option value="un">un</option>
-                              <option value="kg">kg</option>
-                              <option value="g">g</option>
-                              <option value="l">l</option>
-                              <option value="ml">ml</option>
-                            </select>
-                          </div>
+                          <button type="button" onClick={() => setExtractedProducts((p) => p.map((x) => ({ ...x, selected: true })))}
+                            className="text-xs font-bold text-[#8db5ff] underline">Todos</button>
+                          <button type="button" onClick={() => setExtractedProducts((p) => p.map((x) => ({ ...x, selected: false })))}
+                            className="text-xs font-bold text-[#ff8c98] underline">Nenhum</button>
+                          <button type="button" onClick={() => { setCurrentImportIdx(0); setShowImportModal(true); }}
+                            className="ml-auto rounded-lg border border-[#0f5bd4] bg-[#0f5bd4]/15 px-3 py-1 text-xs font-bold text-[#8db5ff] hover:bg-[#0f5bd4]/30">
+                            ✏️ Revisar produtos
+                          </button>
                         </div>
 
-                        {/* Hidden input for per-product image replacement */}
-                        <input
-                          ref={replaceProductImageRef}
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={handleReplaceProductImage}
-                        />
-
-                        {/* Product cards */}
-                        <div className="max-h-[620px] space-y-3 overflow-y-auto pr-1">
+                        {/* Grade de thumbnails — clique para editar no popup */}
+                        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5 max-h-72 overflow-y-auto pr-1">
                           {extractedProducts.map((prod, idx) => {
                             const priceVal = parseFloat(prod.price);
                             const priceOk = !isNaN(priceVal) && priceVal > 0;
-                            const update = (patch: Partial<ExtractedProduct>) =>
-                              setExtractedProducts((prev) =>
-                                prev.map((p) => (p.id === prod.id ? { ...p, ...patch } : p)),
-                              );
                             return (
-                              <div
+                              <button
                                 key={prod.id}
-                                className={`rounded-2xl border p-3 transition ${
+                                type="button"
+                                onClick={() => { setCurrentImportIdx(idx); setShowImportModal(true); }}
+                                className={`group relative overflow-hidden rounded-xl border-2 text-left transition ${
                                   prod.selected ? "border-[#2a4162] bg-[#101d33]" : "border-[#1a2a40] bg-[#080f1c] opacity-40"
-                                }`}
+                                } hover:border-[#0f5bd4]`}
                               >
-                                {/* Card header */}
-                                <div className="mb-3 flex items-center gap-2">
-                                  <input
-                                    type="checkbox"
-                                    checked={prod.selected}
-                                    onChange={(e) => update({ selected: e.target.checked })}
-                                    className="h-4 w-4 accent-[#0f5bd4]"
-                                  />
-                                  <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#8db5ff]">
-                                    Produto {idx + 1}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => setExtractedProducts((p) => p.filter((x) => x.id !== prod.id))}
-                                    className="ml-auto rounded-lg bg-[#c81f2f]/20 px-2 py-1 text-[10px] font-bold text-[#ff8c98] hover:bg-[#c81f2f]/40"
-                                  >
-                                    ✕ Remover
-                                  </button>
+                                <div className="aspect-square overflow-hidden bg-[#0b1424]">
+                                  {prod.imageUrl ? (
+                                    <img src={prod.imageUrl} alt="" className="h-full w-full object-cover" />
+                                  ) : (
+                                    <div className="flex h-full items-center justify-center text-2xl opacity-20">🍞</div>
+                                  )}
                                 </div>
-
-                                <div className="flex gap-3">
-                                  {/* Image — click to replace */}
-                                  <div className="shrink-0">
-                                    <button
-                                      type="button"
-                                      title="Clique para trocar a imagem"
-                                      onClick={() => {
-                                        setReplacingImageProductId(prod.id);
-                                        replaceProductImageRef.current?.click();
-                                      }}
-                                      className="group relative h-24 w-24 overflow-hidden rounded-xl border-2 border-dashed border-[#2f466d] bg-[#0b1424] hover:border-[#0f5bd4]"
-                                    >
-                                      {prod.imageUrl ? (
-                                        <img src={prod.imageUrl} alt="" className="h-full w-full object-cover" />
-                                      ) : (
-                                        <div className="flex h-full items-center justify-center text-3xl opacity-20">🍞</div>
-                                      )}
-                                      <div className="absolute inset-0 flex items-end justify-center bg-black/50 opacity-0 transition group-hover:opacity-100">
-                                        <span className="mb-1 text-[9px] font-bold text-white">Trocar</span>
-                                      </div>
-                                    </button>
-                                    <p className="mt-1 text-center text-[9px] text-[#5a7aaa]">Clique p/ trocar</p>
-                                  </div>
-
-                                  {/* Fields */}
-                                  <div className="min-w-0 flex-1 space-y-2">
-                                    {/* Name */}
-                                    <input
-                                      value={prod.name}
-                                      onChange={(e) => update({ name: e.target.value })}
-                                      placeholder="Nome do produto *"
-                                      className="w-full rounded-lg border border-[#2f466d] bg-[#091426] px-2 py-1.5 text-xs text-[#eef4ff] placeholder:text-[#4a6890]"
-                                    />
-                                    {/* Description */}
-                                    <textarea
-                                      value={prod.description}
-                                      onChange={(e) => update({ description: e.target.value })}
-                                      placeholder="Descrição do produto"
-                                      rows={2}
-                                      className="w-full resize-none rounded-lg border border-[#2f466d] bg-[#091426] px-2 py-1.5 text-xs text-[#eef4ff] placeholder:text-[#4a6890]"
-                                    />
-                                    {/* Price + Unit + Category */}
-                                    <div className="flex flex-wrap gap-2">
-                                      {/* Price */}
-                                      <div className="relative w-28 shrink-0">
-                                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-[#8db5ff]">R$</span>
-                                        <input
-                                          value={prod.price}
-                                          onChange={(e) => update({ price: e.target.value })}
-                                          placeholder="0,00"
-                                          className={`w-full rounded-lg border bg-[#091426] py-1.5 pl-7 pr-2 text-xs text-[#eef4ff] ${
-                                            priceOk ? "border-[#2f466d]" : "border-[#c81f2f]"
-                                          }`}
-                                        />
-                                      </div>
-                                      {/* Unit */}
-                                      <select
-                                        value={prod.unit}
-                                        onChange={(e) => update({ unit: e.target.value })}
-                                        className="rounded-lg border border-[#2f466d] bg-[#091426] px-2 py-1.5 text-xs text-[#eef4ff]"
-                                      >
-                                        <option value="un">un</option>
-                                        <option value="kg">kg</option>
-                                        <option value="g">g</option>
-                                        <option value="l">l</option>
-                                        <option value="ml">ml</option>
-                                      </select>
-                                      {/* Category */}
-                                      <select
-                                        value={prod.category}
-                                        onChange={(e) => update({ category: e.target.value })}
-                                        className="flex-1 rounded-lg border border-[#2f466d] bg-[#091426] px-2 py-1.5 text-xs text-[#eef4ff]"
-                                      >
-                                        {(categories.length > 0 ? categories : ["Salgado","Lanche","Bebida","Doce"]).map((c) => (
-                                          <option key={c} value={c}>{c}</option>
-                                        ))}
-                                      </select>
-                                    </div>
-                                    {!priceOk && (
-                                      <p className="text-[10px] font-semibold text-[#ff8c98]">⚠ Defina um preço maior que 0</p>
-                                    )}
-                                  </div>
+                                <div className="p-1.5">
+                                  <p className="truncate text-[10px] font-bold text-[#eef4ff]">{prod.name || "Sem nome"}</p>
+                                  <p className={`text-[10px] font-semibold ${priceOk ? "text-[#8db5ff]" : "text-[#ff8c98]"}`}>
+                                    {priceOk ? `R$ ${prod.price}` : "Sem preço"}
+                                  </p>
                                 </div>
-                              </div>
+                                <div className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 transition group-hover:opacity-100">
+                                  <span className="text-xs font-bold text-white">✏️ Editar</span>
+                                </div>
+                              </button>
                             );
                           })}
                         </div>
 
-                        {/* Progress */}
+                        {/* Progresso de importação */}
                         {importingProducts && (
-                          <div className="mt-2">
+                          <div>
                             <div className="mb-1 flex justify-between text-xs font-bold">
                               <span className="text-[#8db5ff]">Salvando no banco de dados...</span>
                               <span className="text-white">{importProgress}%</span>
                             </div>
                             <div className="h-3 overflow-hidden rounded-full bg-[#13233f]">
-                              <div
-                                className="h-full rounded-full bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] transition-all duration-300"
-                                style={{ width: `${importProgress}%` }}
-                              />
+                              <div className="h-full rounded-full bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] transition-all duration-300"
+                                style={{ width: `${importProgress}%` }} />
                             </div>
                           </div>
                         )}
 
-                        {/* Result */}
+                        {/* Resultado */}
                         {importResult && (
-                          <div className="rounded-xl border border-[#1f8b4c]/40 bg-[#1f8b4c]/10 p-4">
+                          <div className="rounded-xl border border-[#1f8b4c]/40 bg-[#1f8b4c]/10 p-3">
                             <p className="font-bold text-[#8fe0b8]">
-                              ✓ {importResult.success} produto(s) salvo(s) no banco com sucesso
+                              ✓ {importResult.success} produto(s) salvo(s) com sucesso
                               {importResult.error > 0 && <span className="ml-2 text-[#ff8c98]">· {importResult.error} com erro</span>}
                             </p>
-                            <button
-                              type="button"
+                            <button type="button"
                               onClick={() => { setExtractedProducts([]); setImportResult(null); setShowPdfImport(false); }}
-                              className="mt-3 w-full rounded-xl border border-[#365682] bg-[#13233f] px-4 py-3 text-sm font-bold text-[#d9e7ff]"
-                            >
+                              className="mt-2 w-full rounded-xl border border-[#365682] bg-[#13233f] px-4 py-2 text-sm font-bold text-[#d9e7ff]">
                               Fechar importação
                             </button>
                           </div>
                         )}
 
-                        {/* Import button */}
+                        {/* Botões de ação */}
                         {!importingProducts && !importResult && (
                           <div className="flex gap-2">
-                            <button
-                              type="button"
+                            <button type="button"
                               onClick={() => { setExtractedProducts([]); setImportResult(null); }}
-                              className="rounded-xl border border-[#365682] bg-[#13233f] px-4 py-3 text-sm font-bold text-[#d9e7ff]"
-                            >
+                              className="rounded-xl border border-[#365682] bg-[#13233f] px-4 py-3 text-sm font-bold text-[#d9e7ff]">
                               ← Novo PDF
                             </button>
-                            <button
-                              type="button"
-                              onClick={importProducts}
+                            <button type="button" onClick={importProducts}
                               disabled={extractedProducts.filter((p) => p.selected && p.name.trim()).length === 0}
-                              className="flex-1 rounded-xl bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] px-4 py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
-                            >
+                              className="flex-1 rounded-xl bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] px-4 py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">
                               📥 Salvar {extractedProducts.filter((p) => p.selected && p.name.trim()).length} produto(s) no banco
                             </button>
                           </div>
@@ -2082,6 +1950,166 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+
+      {/* ─── MODAL: Editar produto importado do PDF ─── */}
+      {showImportModal && extractedProducts.length > 0 && (() => {
+        const prod = extractedProducts[currentImportIdx];
+        if (!prod) return null;
+        const update = (patch: Partial<ExtractedProduct>) =>
+          setExtractedProducts((prev) => prev.map((p) => (p.id === prod.id ? { ...p, ...patch } : p)));
+        const priceVal = parseFloat(prod.price);
+        const priceOk = !isNaN(priceVal) && priceVal > 0;
+        const selectedCount = extractedProducts.filter((p) => p.selected && p.name.trim()).length;
+        const catList = categories.length > 0 ? categories : ["Salgado", "Lanche", "Bebida", "Doce"];
+        return (
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center p-0 sm:p-4">
+            <div className="w-full max-w-lg rounded-t-2xl sm:rounded-2xl border border-[#2a4162] bg-[#0b1424] shadow-2xl flex flex-col max-h-[95vh] sm:max-h-[90vh]">
+
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-[#1e3254] px-5 py-4 shrink-0">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#8db5ff]">Produto {currentImportIdx + 1} de {extractedProducts.length}</p>
+                  <p className="mt-0.5 text-base font-bold text-white truncate max-w-[240px]">{prod.name || "Sem nome"}</p>
+                </div>
+                <button type="button" onClick={() => setShowImportModal(false)}
+                  className="rounded-lg border border-[#365682] bg-[#13233f] px-3 py-1.5 text-xs font-bold text-[#d9e7ff] hover:bg-[#1a2f50]">
+                  Fechar
+                </button>
+              </div>
+
+              {/* Body — scrollable */}
+              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+                {/* Imagem — clique para trocar */}
+                <div>
+                  <p className="mb-2 text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">Imagem</p>
+                  <button
+                    type="button"
+                    onClick={() => { setReplacingImageProductId(prod.id); replaceProductImageRef.current?.click(); }}
+                    className="group relative h-52 w-full overflow-hidden rounded-xl border-2 border-dashed border-[#2f466d] bg-[#091426] hover:border-[#0f5bd4] transition"
+                  >
+                    {prod.imageUrl ? (
+                      <img src={prod.imageUrl} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full flex-col items-center justify-center gap-2 text-[#4a6890]">
+                        <span className="text-4xl">📷</span>
+                        <span className="text-xs">Sem imagem</span>
+                      </div>
+                    )}
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/55 opacity-0 transition group-hover:opacity-100">
+                      <div className="rounded-lg bg-[#0f5bd4] px-4 py-2 text-sm font-bold text-white">
+                        📁 Trocar imagem
+                      </div>
+                    </div>
+                  </button>
+                  <p className="mt-1 text-center text-[10px] text-[#5a7aaa]">Clique na imagem para substituir por arquivo do celular ou computador</p>
+                </div>
+
+                {/* Nome */}
+                <div>
+                  <label className="mb-1 block text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">Nome *</label>
+                  <input value={prod.name} onChange={(e) => update({ name: e.target.value })}
+                    placeholder="Nome do produto"
+                    className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-4 py-3 text-sm text-[#eef4ff] placeholder:text-[#4a6890]" />
+                </div>
+
+                {/* Descrição */}
+                <div>
+                  <label className="mb-1 block text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">Descrição</label>
+                  <textarea value={prod.description} onChange={(e) => update({ description: e.target.value })}
+                    placeholder="Descrição do produto" rows={3}
+                    className="w-full resize-none rounded-xl border border-[#2f466d] bg-[#091426] px-4 py-3 text-sm text-[#eef4ff] placeholder:text-[#4a6890]" />
+                </div>
+
+                {/* Preço + Unidade */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="mb-1 block text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">Preço</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold text-[#8db5ff]">R$</span>
+                      <input value={prod.price} onChange={(e) => update({ price: e.target.value })} placeholder="0,00"
+                        className={`w-full rounded-xl border bg-[#091426] py-3 pl-10 pr-4 text-sm text-[#eef4ff] ${priceOk ? "border-[#2f466d]" : "border-[#c81f2f]"}`} />
+                    </div>
+                    {!priceOk && <p className="mt-1 text-[10px] font-semibold text-[#ff8c98]">⚠ Preço inválido</p>}
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">Unidade</label>
+                    <select value={prod.unit} onChange={(e) => update({ unit: e.target.value })}
+                      className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-4 py-3 text-sm text-[#eef4ff]">
+                      <option value="un">Unidade (un)</option>
+                      <option value="kg">Quilo (kg)</option>
+                      <option value="g">Grama (g)</option>
+                      <option value="l">Litro (l)</option>
+                      <option value="ml">Mililitro (ml)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Categoria */}
+                <div>
+                  <label className="mb-1 block text-xs font-bold uppercase tracking-[0.1em] text-[#8db5ff]">Categoria</label>
+                  <select value={prod.category} onChange={(e) => update({ category: e.target.value })}
+                    className="w-full rounded-xl border border-[#2f466d] bg-[#091426] px-4 py-3 text-sm text-[#eef4ff]">
+                    {catList.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+
+                {/* Incluir / excluir */}
+                <label className="flex cursor-pointer items-center gap-3">
+                  <input type="checkbox" checked={prod.selected} onChange={(e) => update({ selected: e.target.checked })}
+                    className="h-5 w-5 accent-[#0f5bd4]" />
+                  <span className="text-sm font-bold text-[#d6e3f8]">Incluir este produto na importação</span>
+                </label>
+              </div>
+
+              {/* Footer — navegação */}
+              <div className="shrink-0 border-t border-[#1e3254] px-5 py-4 space-y-3">
+                {/* Barra de progresso */}
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 h-1.5 overflow-hidden rounded-full bg-[#13233f]">
+                    <div className="h-full rounded-full bg-[#0f5bd4] transition-all duration-300"
+                      style={{ width: `${((currentImportIdx + 1) / extractedProducts.length) * 100}%` }} />
+                  </div>
+                  <span className="text-[10px] font-bold text-[#8db5ff] shrink-0">
+                    {currentImportIdx + 1}/{extractedProducts.length}
+                  </span>
+                </div>
+
+                {/* Prev / Next */}
+                <div className="flex gap-2">
+                  <button type="button" disabled={currentImportIdx === 0}
+                    onClick={() => setCurrentImportIdx((i) => i - 1)}
+                    className="rounded-xl border border-[#365682] bg-[#13233f] px-4 py-3 text-sm font-bold text-[#d9e7ff] disabled:opacity-40">
+                    ← Anterior
+                  </button>
+                  {currentImportIdx < extractedProducts.length - 1 ? (
+                    <button type="button" onClick={() => setCurrentImportIdx((i) => i + 1)}
+                      className="flex-1 rounded-xl bg-[#0f5bd4] px-4 py-3 text-sm font-bold text-white hover:bg-[#0d4db8] transition">
+                      Próximo →
+                    </button>
+                  ) : (
+                    <button type="button"
+                      onClick={() => { setShowImportModal(false); importProducts(); }}
+                      disabled={selectedCount === 0 || importingProducts}
+                      className="flex-1 rounded-xl bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] px-4 py-3 text-sm font-bold text-white disabled:opacity-50">
+                      📥 Importar {selectedCount} produto(s)
+                    </button>
+                  )}
+                </div>
+
+                {/* Atalho para importar sem revisar todos */}
+                {currentImportIdx < extractedProducts.length - 1 && (
+                  <button type="button"
+                    onClick={() => { setShowImportModal(false); importProducts(); }}
+                    disabled={selectedCount === 0 || importingProducts}
+                    className="w-full rounded-xl border border-[#234062] bg-[#091426] px-4 py-2 text-xs font-bold text-[#8db5ff] disabled:opacity-50">
+                    Pular revisão e importar {selectedCount} produto(s) agora
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ─── MODAL: Table details ─── */}
       {selectedTableId && (
