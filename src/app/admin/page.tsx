@@ -383,6 +383,157 @@ export default function AdminPage() {
     return Number.isFinite(parsed) && parsed > 0 ? parsed.toFixed(2) : "0";
   }
 
+  function normalizeText(value: string): string {
+    return value
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+  }
+
+  function splitUnitFromName(name: string, fallbackUnit: string) {
+    const raw = name.trim().replace(/\s+/g, " ");
+    const match = raw.match(/\b(kg|quilo|g|gr|grama|gramas|un|und|unid|unidade|l|lt|litro|ml)\.?$/i);
+    if (!match) {
+      return { cleanedName: raw, unit: fallbackUnit };
+    }
+
+    const unitToken = normalizeText(match[1]);
+    let unit: string = fallbackUnit;
+    if (unitToken === "kg" || unitToken === "quilo") unit = "kg";
+    else if (unitToken === "g" || unitToken === "gr" || unitToken === "grama" || unitToken === "gramas") unit = "g";
+    else if (unitToken === "l" || unitToken === "lt" || unitToken === "litro") unit = "l";
+    else if (unitToken === "ml") unit = "ml";
+    else unit = "un";
+
+    const cleanedName = raw.slice(0, match.index).trim().replace(/[\-_/]+$/, "").trim();
+    return { cleanedName: cleanedName || raw, unit };
+  }
+
+  function detectTableHeaderRow(rows: string[][]) {
+    let bestIndex = -1;
+    let bestScore = -1;
+
+    for (let i = 0; i < Math.min(rows.length, 20); i++) {
+      const row = rows[i].map((c) => normalizeText(c));
+      if (row.every((c) => !c)) continue;
+
+      const hasProduct = row.some((c) => c.includes("produto") || c.includes("nome") || c === "item");
+      const hasPrice = row.some((c) => c.includes("preco") || c.includes("valor") || c === "price");
+      const hasCode = row.some((c) => c.includes("codigo") || c.includes("cod"));
+      const hasUnit = row.some((c) => c.includes("unidade") || c.includes("unit"));
+
+      let score = 0;
+      if (hasProduct) score += 3;
+      if (hasPrice) score += 3;
+      if (hasCode) score += 1;
+      if (hasUnit) score += 1;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = i;
+      }
+    }
+
+    return bestScore >= 3 ? bestIndex : -1;
+  }
+
+  function isPriceLike(value: string): boolean {
+    const v = value.trim();
+    if (!v) return false;
+    if (/r\$\s*\d+/i.test(v)) return true;
+    if (/^\d+[.,]\d{2}$/.test(v)) return true;
+    if (/^\d{1,3}(?:\.\d{3})*,\d{2}$/.test(v)) return true;
+    return false;
+  }
+
+  function isCodeLike(value: string): boolean {
+    const v = value.trim();
+    if (!v) return false;
+    // Typical SKU/code: integer with 3-8 digits, no decimal separators.
+    return /^\d{3,8}$/.test(v);
+  }
+
+  function hasLetters(value: string): boolean {
+    return /[A-Za-zÀ-ÿ]/.test(value);
+  }
+
+  function isHeaderLikeCell(value: string): boolean {
+    const n = normalizeText(value);
+    return (
+      n.includes("produto") ||
+      n.includes("codigo") ||
+      n.includes("preco") ||
+      n.includes("valor") ||
+      n.includes("descricao") ||
+      n.includes("item")
+    );
+  }
+
+  function inferTableColumns(
+    rows: string[][],
+    startIndex: number,
+    header: string[],
+  ): {
+    nameCol: number;
+    priceCol: number;
+    codeCol: number;
+    descCol: number;
+  } {
+    const maxCols = rows.reduce((m, r) => Math.max(m, r.length), 0);
+    const stats = Array.from({ length: maxCols }, () => ({ text: 0, price: 0, code: 0, filled: 0 }));
+
+    const end = Math.min(rows.length, startIndex + 150);
+    for (let i = startIndex; i < end; i++) {
+      const row = rows[i];
+      for (let c = 0; c < maxCols; c++) {
+        const cell = (row[c] || "").trim();
+        if (!cell) continue;
+        stats[c].filled += 1;
+        if (hasLetters(cell)) stats[c].text += 1;
+        if (isPriceLike(cell)) stats[c].price += 1;
+        if (isCodeLike(cell)) stats[c].code += 1;
+      }
+    }
+
+    const headerName = header.findIndex((h) => h.includes("produto") || h.includes("nome") || h.includes("item"));
+    const headerDesc = header.findIndex((h) => h.includes("descr"));
+    const headerPrice = header.findIndex((h) => h.includes("pre") || h.includes("valor") || h.includes("price"));
+    const headerCode = header.findIndex((h) => h.includes("codigo") || h.includes("cod"));
+
+    const bestBy = (kind: "text" | "price" | "code", avoid: number[] = []) => {
+      let idx = -1;
+      let score = -1;
+      for (let c = 0; c < maxCols; c++) {
+        if (avoid.includes(c)) continue;
+        const current = stats[c][kind];
+        if (current > score) {
+          score = current;
+          idx = c;
+        }
+      }
+      return idx;
+    };
+
+    const codeCol = headerCode >= 0 ? headerCode : bestBy("code");
+    let priceCol = headerPrice >= 0 ? headerPrice : bestBy("price", codeCol >= 0 ? [codeCol] : []);
+    if (priceCol < 0 && codeCol >= 0) {
+      // Common layout: [produto, codigo, preco].
+      priceCol = codeCol + 1 < maxCols ? codeCol + 1 : -1;
+    }
+
+    const avoidForName = [priceCol, codeCol].filter((v) => v >= 0);
+    const nameCol = headerName >= 0 ? headerName : bestBy("text", avoidForName);
+    const descCol = headerDesc >= 0 ? headerDesc : -1;
+
+    return {
+      nameCol: nameCol >= 0 ? nameCol : 0,
+      priceCol,
+      codeCol,
+      descCol,
+    };
+  }
+
   function parseClipboardTable(text: string): ExtractedProduct[] {
     const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     if (lines.length === 0) return [];
@@ -394,30 +545,38 @@ export default function AdminPage() {
     });
 
     const { defaultCat, defaultUnit } = getImportDefaults();
-    const header = rows[0].map((h) => h.toLowerCase());
-    const idxName = header.findIndex((h) => h.includes("produto") || h.includes("nome") || h.includes("item"));
-    const idxDesc = header.findIndex((h) => h.includes("descr"));
-    const idxPrice = header.findIndex((h) => h.includes("pre") || h.includes("valor") || h.includes("price"));
-    const hasHeader = idxName >= 0 || idxPrice >= 0;
+    const headerIndex = detectTableHeaderRow(rows);
+    const header = (headerIndex >= 0 ? rows[headerIndex] : rows[0]).map((h) => normalizeText(h));
+    const hasHeader = headerIndex >= 0;
 
     const products: ExtractedProduct[] = [];
-    for (let i = hasHeader ? 1 : 0; i < rows.length; i++) {
+    const startIndex = hasHeader ? headerIndex + 1 : 0;
+    const { nameCol, priceCol, descCol } = inferTableColumns(rows, startIndex, header);
+    for (let i = startIndex; i < rows.length; i++) {
       const row = rows[i];
       if (row.every((c) => !c)) continue;
 
-      const name = idxName >= 0 ? (row[idxName] || "") : (row[0] || "");
-      const desc = idxDesc >= 0 ? (row[idxDesc] || "") : (row[1] || "");
-      const price = parsePriceToString(idxPrice >= 0 ? row[idxPrice] : row[2]);
+      // Skip repeated headers inside the selection.
+      if (row.some((c) => isHeaderLikeCell(c))) continue;
 
-      if (!name && !desc && price === "0") continue;
+      let rawName = row[nameCol] || "";
+      if (!rawName) {
+        rawName = row.find((c) => hasLetters(c) && !isHeaderLikeCell(c)) || "";
+      }
+      const { cleanedName, unit } = splitUnitFromName(rawName, defaultUnit);
+      const desc = descCol >= 0 ? (row[descCol] || "") : "";
+      const guessedPrice = row.find((c) => isPriceLike(c)) || "";
+      const price = parsePriceToString(priceCol >= 0 ? (row[priceCol] || guessedPrice) : guessedPrice);
+
+      if (!cleanedName && !desc && price === "0") continue;
 
       products.push({
         id: crypto.randomUUID(),
         selected: true,
-        name: name || `Produto ${products.length + 1}`,
-        description: (desc || name || "Produto importado").slice(0, 240),
+        name: cleanedName || `Produto ${products.length + 1}`,
+        description: (desc || cleanedName || "Produto importado").slice(0, 240),
         price,
-        unit: defaultUnit,
+        unit,
         category: defaultCat,
         imageUrl: "",
       });
@@ -553,34 +712,42 @@ export default function AdminPage() {
         .map((row) => row.map((c) => String(c ?? "").trim()));
       if (rows.length === 0) continue;
 
-      const header = rows[0].map((h) => h.toLowerCase());
-      const idxName = header.findIndex((h) => h.includes("produto") || h.includes("nome") || h.includes("item"));
-      const idxDesc = header.findIndex((h) => h.includes("descr"));
-      const idxPrice = header.findIndex((h) => h.includes("pre") || h.includes("valor") || h.includes("price"));
+      const headerIndex = detectTableHeaderRow(rows);
+      const header = (headerIndex >= 0 ? rows[headerIndex] : rows[0]).map((h) => normalizeText(h));
       const idxCat = header.findIndex((h) => h.includes("categ"));
       const idxUnit = header.findIndex((h) => h.includes("unid") || h.includes("unit"));
-      const startsWithHeader = idxName >= 0 || idxPrice >= 0;
+      const startsWithHeader = headerIndex >= 0;
 
-      for (let i = startsWithHeader ? 1 : 0; i < rows.length; i++) {
+      const startIndex = startsWithHeader ? headerIndex + 1 : 0;
+      const { nameCol, priceCol, descCol } = inferTableColumns(rows, startIndex, header);
+      for (let i = startIndex; i < rows.length; i++) {
         const row = rows[i];
         if (row.every((c) => !c)) continue;
 
-        const name = idxName >= 0 ? (row[idxName] || "") : (row[0] || "");
-        const description = idxDesc >= 0 ? (row[idxDesc] || "") : (row[1] || "");
-        const priceRaw = idxPrice >= 0 ? (row[idxPrice] || "") : (row[2] || "");
+        // Skip repeated headers inside sheet blocks.
+        if (row.some((c) => isHeaderLikeCell(c))) continue;
+
+        let rawName = row[nameCol] || "";
+        if (!rawName) {
+          rawName = row.find((c) => hasLetters(c) && !isHeaderLikeCell(c)) || "";
+        }
+        const { cleanedName, unit: inferredUnit } = splitUnitFromName(rawName, defaultUnit);
+        const description = descCol >= 0 ? (row[descCol] || "") : "";
+        const guessedPrice = row.find((c) => isPriceLike(c)) || "";
+        const priceRaw = priceCol >= 0 ? (row[priceCol] || guessedPrice) : guessedPrice;
         const price = parsePriceToString(priceRaw);
         const categoryValue = idxCat >= 0 ? (row[idxCat] || "") : "";
         const unitValue = idxUnit >= 0 ? (row[idxUnit] || "") : "";
 
-        if (!name && !description && price === "0") continue;
+        if (!cleanedName && !description && price === "0") continue;
 
         products.push({
           id: crypto.randomUUID(),
           selected: true,
-          name: name || `Produto ${products.length + 1}`,
-          description: (description || name || "Produto importado do Excel").slice(0, 240),
+          name: cleanedName || `Produto ${products.length + 1}`,
+          description: (description || cleanedName || "Produto importado do Excel").slice(0, 240),
           price,
-          unit: unitValue || defaultUnit,
+          unit: unitValue || inferredUnit,
           category: categoryValue || defaultCat,
           imageUrl: "",
         });
