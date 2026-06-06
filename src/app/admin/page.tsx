@@ -316,7 +316,7 @@ export default function AdminPage() {
     setImportResult(null);
     setError("");
     try {
-      // Load pdfjs from CDN at runtime — avoids webpack bundling the library
+      // Load pdfjs from CDN at runtime — avoids webpack bundling
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const pdfjsLib: any = await new Promise((resolve, reject) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -341,16 +341,73 @@ export default function AdminPage() {
       for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
         const page = await pdf.getPage(pageNum);
 
-        // Render page to canvas for thumbnail
-        const viewport = page.getViewport({ scale: 0.8 });
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.floor(viewport.width);
-        canvas.height = Math.floor(viewport.height);
-        const ctx = canvas.getContext("2d");
-        if (ctx) await page.render({ canvasContext: ctx, viewport }).promise;
-        const pageImage = canvas.toDataURL("image/jpeg", 0.55);
+        // ── 1. Render full page to canvas (fallback image) ──────────────
+        const viewport = page.getViewport({ scale: 0.9 });
+        const pageCanvas = document.createElement("canvas");
+        pageCanvas.width = Math.floor(viewport.width);
+        pageCanvas.height = Math.floor(viewport.height);
+        const pageCtx = pageCanvas.getContext("2d");
+        if (pageCtx) await page.render({ canvasContext: pageCtx, viewport }).promise;
+        const pageImageFallback = pageCanvas.toDataURL("image/jpeg", 0.6);
 
-        // Extract text with position info
+        // ── 2. Extract embedded XObject images from the page ─────────────
+        // After render(), page.objs is populated with all image resources.
+        const embeddedImages: string[] = [];
+        try {
+          const opList = await page.getOperatorList();
+          const OPS = pdfjsLib.OPS;
+          const seenRefs = new Set<string>();
+
+          for (let i = 0; i < opList.fnArray.length; i++) {
+            const fn = opList.fnArray[i];
+            if (fn !== OPS.paintImageXObject && fn !== OPS.paintInlineImageXObject) continue;
+
+            const ref = String(opList.argsArray[i][0]);
+            if (seenRefs.has(ref)) continue;
+            seenRefs.add(ref);
+
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const imgData: any = await new Promise((res) => page.objs.get(ref, res));
+              if (!imgData?.width || !imgData?.height || !imgData?.data) continue;
+              // Skip tiny decorative images
+              if (imgData.width < 80 || imgData.height < 80) continue;
+
+              const ic = document.createElement("canvas");
+              ic.width = imgData.width;
+              ic.height = imgData.height;
+              const ictx = ic.getContext("2d")!;
+              const pixCount = imgData.width * imgData.height;
+              const ch = Math.round((imgData.data as Uint8Array).length / pixCount);
+              const rgba = new Uint8ClampedArray(pixCount * 4);
+
+              for (let p = 0; p < pixCount; p++) {
+                if (ch === 4) {
+                  rgba[p * 4]     = imgData.data[p * 4];
+                  rgba[p * 4 + 1] = imgData.data[p * 4 + 1];
+                  rgba[p * 4 + 2] = imgData.data[p * 4 + 2];
+                  rgba[p * 4 + 3] = imgData.data[p * 4 + 3];
+                } else if (ch === 3) {
+                  rgba[p * 4]     = imgData.data[p * 3];
+                  rgba[p * 4 + 1] = imgData.data[p * 3 + 1];
+                  rgba[p * 4 + 2] = imgData.data[p * 3 + 2];
+                  rgba[p * 4 + 3] = 255;
+                } else {
+                  const v = imgData.data[p];
+                  rgba[p * 4] = rgba[p * 4 + 1] = rgba[p * 4 + 2] = v;
+                  rgba[p * 4 + 3] = 255;
+                }
+              }
+
+              const id2 = ictx.createImageData(imgData.width, imgData.height);
+              id2.data.set(rgba);
+              ictx.putImageData(id2, 0, 0);
+              embeddedImages.push(ic.toDataURL("image/jpeg", 0.8));
+            } catch { /* skip image errors */ }
+          }
+        } catch { /* fallback to page render if opList fails */ }
+
+        // ── 3. Extract text with positions ───────────────────────────────
         const textContent = await page.getTextContent();
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const rawItems = (textContent.items as any[])
@@ -362,7 +419,6 @@ export default function AdminPage() {
           return Math.abs(dy) > 3 ? dy : a.x - b.x;
         });
 
-        // Group chars into lines
         const lines: string[] = [];
         let lineY = -9999;
         let parts: string[] = [];
@@ -379,21 +435,30 @@ export default function AdminPage() {
         const lastJoined = parts.join(" ").trim();
         if (lastJoined) lines.push(lastJoined);
 
-        // Parse products — R$ price pattern anchors each product block
-        const priceRe = /R\$\s*(\d{1,6})[,.](\d{2})/;
+        // ── 4. Parse products — price anchors each block ──────────────────
+        // Accepts: R$ 12,90 | R$ 1.290,00 | R$12,90
+        const priceRe = /R\$\s*([\d]{1,3}(?:[.][\d]{3})*)[,]([\d]{2})/;
+        // Skip separator/decorative lines
+        const skipRe = /^[-_=•·*]{2,}$|^\d+$|^página\s*\d+$/i;
+
         let buf = { name: "", desc: "" };
+        const pageProducts: ExtractedProduct[] = [];
+
         for (const line of lines) {
+          if (skipRe.test(line.trim())) continue;
+
           const m = line.match(priceRe);
           if (m) {
+            const price = `${m[1].replace(/\./g, "")}.${m[2]}`;
             if (buf.name) {
-              allProducts.push({
+              pageProducts.push({
                 id: crypto.randomUUID(),
                 selected: true,
-                name: buf.name,
-                description: buf.desc || buf.name,
-                price: `${m[1]}.${m[2]}`,
+                name: buf.name.trim(),
+                description: (buf.desc || buf.name).trim().slice(0, 220),
+                price,
                 category: categories[0] || "Salgado",
-                imageUrl: pageImage,
+                imageUrl: "",
               });
             }
             buf = { name: "", desc: "" };
@@ -402,20 +467,33 @@ export default function AdminPage() {
           } else if (!buf.desc) {
             buf.desc = line;
           } else {
-            buf.desc += " " + line;
+            buf.desc = (buf.desc + " " + line).slice(0, 300);
           }
         }
         if (buf.name) {
-          allProducts.push({
+          pageProducts.push({
             id: crypto.randomUUID(),
             selected: true,
-            name: buf.name,
-            description: buf.desc || buf.name,
+            name: buf.name.trim(),
+            description: (buf.desc || buf.name).trim().slice(0, 220),
             price: "0",
             category: categories[0] || "Salgado",
-            imageUrl: pageImage,
+            imageUrl: "",
           });
         }
+
+        // ── 5. Assign best image to each product ──────────────────────────
+        // If embedded images exist, match by index (image[0]→product[0], …).
+        // Extra products share the last embedded image. Fallback: full page.
+        for (let pi = 0; pi < pageProducts.length; pi++) {
+          if (embeddedImages.length > 0) {
+            pageProducts[pi].imageUrl = embeddedImages[Math.min(pi, embeddedImages.length - 1)];
+          } else {
+            pageProducts[pi].imageUrl = pageImageFallback;
+          }
+        }
+
+        allProducts.push(...pageProducts);
       }
 
       if (allProducts.length === 0) {
