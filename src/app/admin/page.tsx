@@ -36,6 +36,7 @@ type ExtractedProduct = {
   name: string;
   description: string;
   price: string;
+  unit: string;
   category: string;
   imageUrl: string;
 };
@@ -114,6 +115,7 @@ export default function AdminPage() {
 
   const imageFileRef = useRef<HTMLInputElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
+  const replaceProductImageRef = useRef<HTMLInputElement>(null);
 
   const [showPdfImport, setShowPdfImport] = useState(false);
   const [pdfProcessing, setPdfProcessing] = useState(false);
@@ -121,6 +123,9 @@ export default function AdminPage() {
   const [importingProducts, setImportingProducts] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [importResult, setImportResult] = useState<{ success: number; error: number } | null>(null);
+  const [importDefaultCategory, setImportDefaultCategory] = useState("");
+  const [importDefaultUnit, setImportDefaultUnit] = useState("un");
+  const [replacingImageProductId, setReplacingImageProductId] = useState<string | null>(null);
 
   async function loadData() {
     const [menuRes, ordersRes, categoriesRes, bakerRes, adminRes, tablesRes] = await Promise.all([
@@ -302,6 +307,21 @@ export default function AdminPage() {
     e.stopPropagation();
   };
 
+  function handleReplaceProductImage(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !replacingImageProductId) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const result = ev.target?.result as string;
+      setExtractedProducts((prev) =>
+        prev.map((p) => (p.id === replacingImageProductId ? { ...p, imageUrl: result } : p)),
+      );
+      setReplacingImageProductId(null);
+    };
+    reader.readAsDataURL(file);
+    if (replaceProductImageRef.current) replaceProductImageRef.current.value = "";
+  }
+
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (file && file.type.startsWith("image/")) {
@@ -482,10 +502,28 @@ export default function AdminPage() {
           });
         }
 
-        // ── 5. Assign best image to each product ──────────────────────────
-        // If embedded images exist, match by index (image[0]→product[0], …).
-        // Extra products share the last embedded image. Fallback: full page.
+        // ── 5. Assign best image + defaults to each product ──────────────
+        const defaultCat = importDefaultCategory || categories[0] || "Salgado";
+        const defaultUnit = importDefaultUnit || "un";
+
+        // For scanned/image PDFs with no text: add one empty product per page
+        // so the user can fill in details manually (image is the page render).
+        if (pageProducts.length === 0 && pageImageFallback) {
+          allProducts.push({
+            id: crypto.randomUUID(),
+            selected: true,
+            name: "",
+            description: "",
+            price: "0",
+            unit: defaultUnit,
+            category: defaultCat,
+            imageUrl: pageImageFallback,
+          });
+        }
+
         for (let pi = 0; pi < pageProducts.length; pi++) {
+          pageProducts[pi].unit = defaultUnit;
+          pageProducts[pi].category = defaultCat;
           if (embeddedImages.length > 0) {
             pageProducts[pi].imageUrl = embeddedImages[Math.min(pi, embeddedImages.length - 1)];
           } else {
@@ -497,10 +535,15 @@ export default function AdminPage() {
       }
 
       if (allProducts.length === 0) {
-        setError("Nenhum produto encontrado. Verifique se o PDF contém texto selecionável (não é imagem escaneada).");
+        setError("Nenhum conteúdo encontrado. Verifique se o PDF tem pelo menos uma página.");
       } else {
         setExtractedProducts(allProducts);
-        setFormNotice(`${allProducts.length} produto(s) extraído(s). Revise os dados antes de importar.`);
+        const textCount = allProducts.filter((p) => p.name).length;
+        const emptyCount = allProducts.length - textCount;
+        setFormNotice(
+          `${allProducts.length} produto(s) extraído(s).` +
+          (emptyCount > 0 ? ` ${emptyCount} página(s) sem texto — preencha manualmente.` : " Revise antes de importar."),
+        );
       }
     } catch (e) {
       setError("Erro ao processar PDF: " + (e instanceof Error ? e.message : String(e)));
@@ -525,7 +568,7 @@ export default function AdminPage() {
       description: (p.description || p.name).trim(),
       price: Math.max(parseFloat(p.price) || 0.01, 0.01),
       category: p.category || categories[0] || "Salgado",
-      unit: "un",
+      unit: p.unit || "un",
       imageUrl: p.imageUrl,
       available: true,
     }));
@@ -1045,198 +1088,271 @@ export default function AdminPage() {
 
                 {/* ── PDF Import Panel ── */}
                 {showPdfImport && (
-                  <section className="rounded-2xl border border-[#0f5bd4]/40 bg-[#0b1424] p-4">
-                    <h2 className="text-xl font-bold text-white">Importação em massa via PDF</h2>
-                    <p className="mt-1 text-xs text-[#9bb0d0]">
-                      Faça upload de um PDF de cardápio. O sistema extrai nome, descrição e preço de cada produto automaticamente.
-                    </p>
-
-                    {/* Upload area */}
-                    <div className="mt-4">
-                      <input
-                        ref={pdfInputRef}
-                        type="file"
-                        accept=".pdf"
-                        className="hidden"
-                        onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          if (file) await processPdf(file);
-                          if (pdfInputRef.current) pdfInputRef.current.value = "";
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => pdfInputRef.current?.click()}
-                        disabled={pdfProcessing}
-                        className="w-full rounded-xl border-2 border-dashed border-[#2f466d] bg-[#091426] px-4 py-10 text-center transition hover:border-[#0f5bd4] disabled:opacity-60"
-                      >
-                        {pdfProcessing ? (
-                          <div className="space-y-2">
-                            <p className="animate-pulse text-lg text-[#8db5ff]">⏳ Lendo PDF...</p>
-                            <p className="text-xs text-[#6a88af]">Extraindo texto e imagens das páginas</p>
-                          </div>
-                        ) : (
-                          <div className="space-y-2">
-                            <p className="text-3xl">📄</p>
-                            <p className="text-sm font-bold text-[#d6e3f8]">Clique para selecionar o PDF</p>
-                            <p className="text-xs text-[#6a88af]">
-                              O sistema identifica nome, descrição e preço (R$) em cada página
-                            </p>
-                          </div>
-                        )}
-                      </button>
+                  <section className="space-y-5 rounded-2xl border border-[#0f5bd4]/40 bg-[#0b1424] p-4">
+                    {/* Header */}
+                    <div>
+                      <h2 className="text-xl font-bold text-white">Importação em massa via PDF</h2>
+                      <p className="mt-1 text-xs text-[#9bb0d0]">
+                        Funciona com <strong className="text-[#8db5ff]">qualquer tipo de PDF</strong> — digital ou escaneado.
+                        Para PDFs escaneados ou sem texto, os campos ficam em branco para preenchimento manual.
+                      </p>
                     </div>
 
-                    {/* Preview of extracted products */}
+                    {/* ── Configurações padrão (visível antes de carregar PDF) ── */}
+                    {extractedProducts.length === 0 && (
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                        <div className="col-span-2">
+                          <label className="mb-1 block text-[10px] font-bold uppercase tracking-[0.1em] text-[#8db5ff]">
+                            Categoria padrão
+                          </label>
+                          <select
+                            value={importDefaultCategory}
+                            onChange={(e) => setImportDefaultCategory(e.target.value)}
+                            className="w-full rounded-lg border border-[#2f466d] bg-[#091426] px-3 py-2 text-xs text-[#eef4ff]"
+                          >
+                            {categories.length > 0 ? (
+                              categories.map((c) => <option key={c} value={c}>{c}</option>)
+                            ) : (
+                              <>
+                                <option value="Salgado">Salgado</option>
+                                <option value="Lanche">Lanche</option>
+                                <option value="Bebida">Bebida</option>
+                                <option value="Doce">Doce</option>
+                              </>
+                            )}
+                          </select>
+                        </div>
+                        <div className="col-span-2 sm:col-span-2">
+                          <label className="mb-1 block text-[10px] font-bold uppercase tracking-[0.1em] text-[#8db5ff]">
+                            Unidade padrão
+                          </label>
+                          <select
+                            value={importDefaultUnit}
+                            onChange={(e) => setImportDefaultUnit(e.target.value)}
+                            className="w-full rounded-lg border border-[#2f466d] bg-[#091426] px-3 py-2 text-xs text-[#eef4ff]"
+                          >
+                            <option value="un">Unidade (un)</option>
+                            <option value="kg">Quilo (kg)</option>
+                            <option value="g">Grama (g)</option>
+                            <option value="l">Litro (l)</option>
+                            <option value="ml">Mililitro (ml)</option>
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── Upload area ── */}
+                    {extractedProducts.length === 0 && (
+                      <>
+                        <input
+                          ref={pdfInputRef}
+                          type="file"
+                          accept=".pdf"
+                          className="hidden"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (file) await processPdf(file);
+                            if (pdfInputRef.current) pdfInputRef.current.value = "";
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => pdfInputRef.current?.click()}
+                          disabled={pdfProcessing}
+                          className="w-full rounded-xl border-2 border-dashed border-[#2f466d] bg-[#091426] px-4 py-10 text-center transition hover:border-[#0f5bd4] disabled:opacity-60"
+                        >
+                          {pdfProcessing ? (
+                            <div className="space-y-2">
+                              <p className="animate-pulse text-lg text-[#8db5ff]">⏳ Processando PDF...</p>
+                              <p className="text-xs text-[#6a88af]">Renderizando páginas e extraindo conteúdo</p>
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              <p className="text-4xl">📄</p>
+                              <p className="text-sm font-bold text-[#d6e3f8]">Clique para selecionar o PDF</p>
+                              <p className="text-xs text-[#6a88af]">
+                                Cada página vira um produto com imagem, descrição e preço extraídos
+                              </p>
+                            </div>
+                          )}
+                        </button>
+                      </>
+                    )}
+
+                    {/* ── Preview dos produtos extraídos ── */}
                     {extractedProducts.length > 0 && (
-                      <div className="mt-6">
-                        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                          <h3 className="text-base font-bold text-white">
-                            Preview — {extractedProducts.filter((p) => p.selected).length} de{" "}
-                            {extractedProducts.length} produto(s) selecionado(s)
-                          </h3>
-                          <div className="flex gap-3">
-                            <button
-                              type="button"
-                              onClick={() => setExtractedProducts((prev) => prev.map((p) => ({ ...p, selected: true })))}
-                              className="text-xs font-bold text-[#8db5ff] underline"
+                      <div className="space-y-4">
+                        {/* Controls bar */}
+                        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[#2a4162] bg-[#091426] p-3">
+                          <span className="text-xs font-bold text-white">
+                            {extractedProducts.filter((p) => p.selected).length}/{extractedProducts.length} selecionado(s)
+                          </span>
+                          <div className="flex gap-2">
+                            <button type="button" onClick={() => setExtractedProducts((p) => p.map((x) => ({ ...x, selected: true })))}
+                              className="text-xs font-bold text-[#8db5ff] underline">Todos</button>
+                            <button type="button" onClick={() => setExtractedProducts((p) => p.map((x) => ({ ...x, selected: false })))}
+                              className="text-xs font-bold text-[#ff8c98] underline">Nenhum</button>
+                          </div>
+                          {/* Aplicar categoria/unidade a todos */}
+                          <div className="ml-auto flex flex-wrap gap-2">
+                            <select
+                              defaultValue=""
+                              onChange={(e) => {
+                                if (!e.target.value) return;
+                                setExtractedProducts((p) => p.map((x) => ({ ...x, category: e.target.value })));
+                                e.target.value = "";
+                              }}
+                              className="rounded-lg border border-[#2f466d] bg-[#0b1424] px-2 py-1 text-[10px] text-[#8db5ff]"
                             >
-                              Todos
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setExtractedProducts((prev) => prev.map((p) => ({ ...p, selected: false })))}
-                              className="text-xs font-bold text-[#ff8c98] underline"
+                              <option value="">Aplicar categoria a todos…</option>
+                              {(categories.length > 0 ? categories : ["Salgado","Lanche","Bebida","Doce"]).map((c) => (
+                                <option key={c} value={c}>{c}</option>
+                              ))}
+                            </select>
+                            <select
+                              defaultValue=""
+                              onChange={(e) => {
+                                if (!e.target.value) return;
+                                setExtractedProducts((p) => p.map((x) => ({ ...x, unit: e.target.value })));
+                                e.target.value = "";
+                              }}
+                              className="rounded-lg border border-[#2f466d] bg-[#0b1424] px-2 py-1 text-[10px] text-[#8db5ff]"
                             >
-                              Nenhum
-                            </button>
+                              <option value="">Aplicar unidade a todos…</option>
+                              <option value="un">un</option>
+                              <option value="kg">kg</option>
+                              <option value="g">g</option>
+                              <option value="l">l</option>
+                              <option value="ml">ml</option>
+                            </select>
                           </div>
                         </div>
 
-                        <div className="max-h-[540px] space-y-3 overflow-y-auto pr-1">
-                          {extractedProducts.map((prod) => {
+                        {/* Hidden input for per-product image replacement */}
+                        <input
+                          ref={replaceProductImageRef}
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={handleReplaceProductImage}
+                        />
+
+                        {/* Product cards */}
+                        <div className="max-h-[620px] space-y-3 overflow-y-auto pr-1">
+                          {extractedProducts.map((prod, idx) => {
                             const priceVal = parseFloat(prod.price);
                             const priceOk = !isNaN(priceVal) && priceVal > 0;
+                            const update = (patch: Partial<ExtractedProduct>) =>
+                              setExtractedProducts((prev) =>
+                                prev.map((p) => (p.id === prod.id ? { ...p, ...patch } : p)),
+                              );
                             return (
                               <div
                                 key={prod.id}
-                                className={`rounded-xl border p-3 transition ${
-                                  prod.selected
-                                    ? "border-[#2a4162] bg-[#101d33]"
-                                    : "border-[#1a2a40] bg-[#080f1c] opacity-50"
+                                className={`rounded-2xl border p-3 transition ${
+                                  prod.selected ? "border-[#2a4162] bg-[#101d33]" : "border-[#1a2a40] bg-[#080f1c] opacity-40"
                                 }`}
                               >
-                                <div className="flex gap-3">
-                                  {/* Checkbox */}
+                                {/* Card header */}
+                                <div className="mb-3 flex items-center gap-2">
                                   <input
                                     type="checkbox"
                                     checked={prod.selected}
-                                    onChange={(e) =>
-                                      setExtractedProducts((prev) =>
-                                        prev.map((p) =>
-                                          p.id === prod.id ? { ...p, selected: e.target.checked } : p,
-                                        ),
-                                      )
-                                    }
-                                    className="mt-1 h-4 w-4 shrink-0 accent-[#0f5bd4]"
+                                    onChange={(e) => update({ selected: e.target.checked })}
+                                    className="h-4 w-4 accent-[#0f5bd4]"
                                   />
-                                  {/* Thumbnail */}
-                                  <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-[#2b4062] bg-[#0b1424]">
-                                    <img
-                                      src={prod.imageUrl}
-                                      alt=""
-                                      className="h-full w-full object-cover"
-                                    />
+                                  <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#8db5ff]">
+                                    Produto {idx + 1}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setExtractedProducts((p) => p.filter((x) => x.id !== prod.id))}
+                                    className="ml-auto rounded-lg bg-[#c81f2f]/20 px-2 py-1 text-[10px] font-bold text-[#ff8c98] hover:bg-[#c81f2f]/40"
+                                  >
+                                    ✕ Remover
+                                  </button>
+                                </div>
+
+                                <div className="flex gap-3">
+                                  {/* Image — click to replace */}
+                                  <div className="shrink-0">
+                                    <button
+                                      type="button"
+                                      title="Clique para trocar a imagem"
+                                      onClick={() => {
+                                        setReplacingImageProductId(prod.id);
+                                        replaceProductImageRef.current?.click();
+                                      }}
+                                      className="group relative h-24 w-24 overflow-hidden rounded-xl border-2 border-dashed border-[#2f466d] bg-[#0b1424] hover:border-[#0f5bd4]"
+                                    >
+                                      {prod.imageUrl ? (
+                                        <img src={prod.imageUrl} alt="" className="h-full w-full object-cover" />
+                                      ) : (
+                                        <div className="flex h-full items-center justify-center text-3xl opacity-20">🍞</div>
+                                      )}
+                                      <div className="absolute inset-0 flex items-end justify-center bg-black/50 opacity-0 transition group-hover:opacity-100">
+                                        <span className="mb-1 text-[9px] font-bold text-white">Trocar</span>
+                                      </div>
+                                    </button>
+                                    <p className="mt-1 text-center text-[9px] text-[#5a7aaa]">Clique p/ trocar</p>
                                   </div>
+
                                   {/* Fields */}
                                   <div className="min-w-0 flex-1 space-y-2">
+                                    {/* Name */}
                                     <input
                                       value={prod.name}
-                                      onChange={(e) =>
-                                        setExtractedProducts((prev) =>
-                                          prev.map((p) =>
-                                            p.id === prod.id ? { ...p, name: e.target.value } : p,
-                                          ),
-                                        )
-                                      }
-                                      placeholder="Nome do produto"
-                                      className="w-full rounded-lg border border-[#2f466d] bg-[#091426] px-2 py-1.5 text-xs text-[#eef4ff]"
+                                      onChange={(e) => update({ name: e.target.value })}
+                                      placeholder="Nome do produto *"
+                                      className="w-full rounded-lg border border-[#2f466d] bg-[#091426] px-2 py-1.5 text-xs text-[#eef4ff] placeholder:text-[#4a6890]"
                                     />
-                                    <input
+                                    {/* Description */}
+                                    <textarea
                                       value={prod.description}
-                                      onChange={(e) =>
-                                        setExtractedProducts((prev) =>
-                                          prev.map((p) =>
-                                            p.id === prod.id ? { ...p, description: e.target.value } : p,
-                                          ),
-                                        )
-                                      }
-                                      placeholder="Descrição"
-                                      className="w-full rounded-lg border border-[#2f466d] bg-[#091426] px-2 py-1.5 text-xs text-[#eef4ff]"
+                                      onChange={(e) => update({ description: e.target.value })}
+                                      placeholder="Descrição do produto"
+                                      rows={2}
+                                      className="w-full resize-none rounded-lg border border-[#2f466d] bg-[#091426] px-2 py-1.5 text-xs text-[#eef4ff] placeholder:text-[#4a6890]"
                                     />
-                                    <div className="flex gap-2">
+                                    {/* Price + Unit + Category */}
+                                    <div className="flex flex-wrap gap-2">
                                       {/* Price */}
                                       <div className="relative w-28 shrink-0">
-                                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-[#8db5ff]">
-                                          R$
-                                        </span>
+                                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-[#8db5ff]">R$</span>
                                         <input
                                           value={prod.price}
-                                          onChange={(e) =>
-                                            setExtractedProducts((prev) =>
-                                              prev.map((p) =>
-                                                p.id === prod.id ? { ...p, price: e.target.value } : p,
-                                              ),
-                                            )
-                                          }
+                                          onChange={(e) => update({ price: e.target.value })}
                                           placeholder="0,00"
                                           className={`w-full rounded-lg border bg-[#091426] py-1.5 pl-7 pr-2 text-xs text-[#eef4ff] ${
                                             priceOk ? "border-[#2f466d]" : "border-[#c81f2f]"
                                           }`}
                                         />
                                       </div>
+                                      {/* Unit */}
+                                      <select
+                                        value={prod.unit}
+                                        onChange={(e) => update({ unit: e.target.value })}
+                                        className="rounded-lg border border-[#2f466d] bg-[#091426] px-2 py-1.5 text-xs text-[#eef4ff]"
+                                      >
+                                        <option value="un">un</option>
+                                        <option value="kg">kg</option>
+                                        <option value="g">g</option>
+                                        <option value="l">l</option>
+                                        <option value="ml">ml</option>
+                                      </select>
                                       {/* Category */}
                                       <select
                                         value={prod.category}
-                                        onChange={(e) =>
-                                          setExtractedProducts((prev) =>
-                                            prev.map((p) =>
-                                              p.id === prod.id ? { ...p, category: e.target.value } : p,
-                                            ),
-                                          )
-                                        }
+                                        onChange={(e) => update({ category: e.target.value })}
                                         className="flex-1 rounded-lg border border-[#2f466d] bg-[#091426] px-2 py-1.5 text-xs text-[#eef4ff]"
                                       >
-                                        {categories.length > 0 ? (
-                                          categories.map((cat) => (
-                                            <option key={cat} value={cat}>
-                                              {cat}
-                                            </option>
-                                          ))
-                                        ) : (
-                                          <>
-                                            <option value="Salgado">Salgado</option>
-                                            <option value="Lanche">Lanche</option>
-                                            <option value="Bebida">Bebida</option>
-                                            <option value="Doce">Doce</option>
-                                          </>
-                                        )}
+                                        {(categories.length > 0 ? categories : ["Salgado","Lanche","Bebida","Doce"]).map((c) => (
+                                          <option key={c} value={c}>{c}</option>
+                                        ))}
                                       </select>
-                                      {/* Remove */}
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          setExtractedProducts((prev) => prev.filter((p) => p.id !== prod.id))
-                                        }
-                                        className="rounded-lg bg-[#c81f2f] px-2 py-1.5 text-xs font-bold text-white"
-                                      >
-                                        ✕
-                                      </button>
                                     </div>
                                     {!priceOk && (
-                                      <p className="text-[10px] font-semibold text-[#ff8c98]">
-                                        ⚠ Defina um preço maior que 0
-                                      </p>
+                                      <p className="text-[10px] font-semibold text-[#ff8c98]">⚠ Defina um preço maior que 0</p>
                                     )}
                                   </div>
                                 </div>
@@ -1245,14 +1361,14 @@ export default function AdminPage() {
                           })}
                         </div>
 
-                        {/* Progress bar */}
+                        {/* Progress */}
                         {importingProducts && (
-                          <div className="mt-5">
+                          <div className="mt-2">
                             <div className="mb-1 flex justify-between text-xs font-bold">
-                              <span className="text-[#8db5ff]">Importando produtos...</span>
+                              <span className="text-[#8db5ff]">Salvando no banco de dados...</span>
                               <span className="text-white">{importProgress}%</span>
                             </div>
-                            <div className="h-2.5 overflow-hidden rounded-full bg-[#13233f]">
+                            <div className="h-3 overflow-hidden rounded-full bg-[#13233f]">
                               <div
                                 className="h-full rounded-full bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] transition-all duration-300"
                                 style={{ width: `${importProgress}%` }}
@@ -1263,20 +1379,14 @@ export default function AdminPage() {
 
                         {/* Result */}
                         {importResult && (
-                          <div className="mt-4 rounded-xl border border-[#1f8b4c]/40 bg-[#1f8b4c]/10 p-4">
+                          <div className="rounded-xl border border-[#1f8b4c]/40 bg-[#1f8b4c]/10 p-4">
                             <p className="font-bold text-[#8fe0b8]">
-                              ✓ {importResult.success} produto(s) cadastrado(s) com sucesso
-                              {importResult.error > 0 && (
-                                <span className="ml-2 text-[#ff8c98]">· {importResult.error} com erro</span>
-                              )}
+                              ✓ {importResult.success} produto(s) salvo(s) no banco com sucesso
+                              {importResult.error > 0 && <span className="ml-2 text-[#ff8c98]">· {importResult.error} com erro</span>}
                             </p>
                             <button
                               type="button"
-                              onClick={() => {
-                                setExtractedProducts([]);
-                                setImportResult(null);
-                                setShowPdfImport(false);
-                              }}
+                              onClick={() => { setExtractedProducts([]); setImportResult(null); setShowPdfImport(false); }}
                               className="mt-3 w-full rounded-xl border border-[#365682] bg-[#13233f] px-4 py-3 text-sm font-bold text-[#d9e7ff]"
                             >
                               Fechar importação
@@ -1286,14 +1396,23 @@ export default function AdminPage() {
 
                         {/* Import button */}
                         {!importingProducts && !importResult && (
-                          <button
-                            type="button"
-                            onClick={importProducts}
-                            disabled={extractedProducts.filter((p) => p.selected).length === 0}
-                            className="mt-4 w-full rounded-xl bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] px-4 py-3 font-bold text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            📥 Cadastrar {extractedProducts.filter((p) => p.selected).length} produto(s) no banco
-                          </button>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => { setExtractedProducts([]); setImportResult(null); }}
+                              className="rounded-xl border border-[#365682] bg-[#13233f] px-4 py-3 text-sm font-bold text-[#d9e7ff]"
+                            >
+                              ← Novo PDF
+                            </button>
+                            <button
+                              type="button"
+                              onClick={importProducts}
+                              disabled={extractedProducts.filter((p) => p.selected && p.name.trim()).length === 0}
+                              className="flex-1 rounded-xl bg-gradient-to-r from-[#c81f2f] to-[#0f5bd4] px-4 py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              📥 Salvar {extractedProducts.filter((p) => p.selected && p.name.trim()).length} produto(s) no banco
+                            </button>
+                          </div>
                         )}
                       </div>
                     )}
