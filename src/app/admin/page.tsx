@@ -32,6 +32,7 @@ type ProductDraft = {
 type ExtractedProduct = {
   id: string;
   selected: boolean;
+  showInVitrine: boolean;
   name: string;
   description: string;
   price: string;
@@ -335,18 +336,19 @@ export default function AdminPage() {
     e.stopPropagation();
   };
 
-  function handleReplaceProductImage(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleReplaceProductImage(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file || !replacingImageProductId) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const result = ev.target?.result as string;
+
+    try {
+      const result = await fileToDataUrlWithoutBackground(file);
       setExtractedProducts((prev) =>
         prev.map((p) => (p.id === replacingImageProductId ? { ...p, imageUrl: result } : p)),
       );
+    } finally {
       setReplacingImageProductId(null);
-    };
-    reader.readAsDataURL(file);
+    }
+
     if (replaceProductImageRef.current) replaceProductImageRef.current.value = "";
   }
 
@@ -603,6 +605,7 @@ export default function AdminPage() {
       products.push({
         id: crypto.randomUUID(),
         selected: true,
+        showInVitrine: false,
         name: cleanedName || `Produto ${products.length + 1}`,
         description: (desc || cleanedName || "Produto importado").slice(0, 240),
         price,
@@ -649,6 +652,140 @@ export default function AdminPage() {
     };
   }
 
+  function colorDistance(r1: number, g1: number, b1: number, r2: number, g2: number, b2: number) {
+    const dr = r1 - r2;
+    const dg = g1 - g2;
+    const db = b1 - b2;
+    return Math.sqrt(dr * dr + dg * dg + db * db);
+  }
+
+  async function removeImageBackgroundDataUrl(dataUrl: string): Promise<string> {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error("Falha ao carregar imagem para remover fundo."));
+      image.src = dataUrl;
+    });
+
+    const maxSide = 1000;
+    const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+    const width = Math.max(1, Math.round(img.width * scale));
+    const height = Math.max(1, Math.round(img.height * scale));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return dataUrl;
+
+    ctx.drawImage(img, 0, 0, width, height);
+    const imgData = ctx.getImageData(0, 0, width, height);
+    const pixels = imgData.data;
+
+    // Estimate background from image borders and remove only connected backdrop pixels.
+    let sumR = 0;
+    let sumG = 0;
+    let sumB = 0;
+    let sampleCount = 0;
+    const sampleStep = Math.max(1, Math.floor(Math.min(width, height) / 80));
+
+    const addSample = (x: number, y: number) => {
+      const idx = (y * width + x) * 4;
+      sumR += pixels[idx];
+      sumG += pixels[idx + 1];
+      sumB += pixels[idx + 2];
+      sampleCount += 1;
+    };
+
+    for (let x = 0; x < width; x += sampleStep) {
+      addSample(x, 0);
+      addSample(x, height - 1);
+    }
+    for (let y = 0; y < height; y += sampleStep) {
+      addSample(0, y);
+      addSample(width - 1, y);
+    }
+
+    if (sampleCount === 0) return dataUrl;
+
+    const bgR = Math.round(sumR / sampleCount);
+    const bgG = Math.round(sumG / sampleCount);
+    const bgB = Math.round(sumB / sampleCount);
+    const bgIsBright = bgR + bgG + bgB > 660;
+    const threshold = bgIsBright ? 62 : 48;
+
+    const visited = new Uint8Array(width * height);
+    const queueX = new Int32Array(width * height);
+    const queueY = new Int32Array(width * height);
+    let qHead = 0;
+    let qTail = 0;
+
+    const canRemove = (x: number, y: number) => {
+      const i = (y * width + x) * 4;
+      const r = pixels[i];
+      const g = pixels[i + 1];
+      const b = pixels[i + 2];
+      const a = pixels[i + 3];
+      if (a === 0) return true;
+
+      const nearEstimatedBg = colorDistance(r, g, b, bgR, bgG, bgB) <= threshold;
+      const nearWhite = r > 228 && g > 228 && b > 228;
+      return nearEstimatedBg || (bgIsBright && nearWhite);
+    };
+
+    const enqueue = (x: number, y: number) => {
+      const p = y * width + x;
+      if (visited[p]) return;
+      if (!canRemove(x, y)) return;
+      visited[p] = 1;
+      queueX[qTail] = x;
+      queueY[qTail] = y;
+      qTail += 1;
+    };
+
+    for (let x = 0; x < width; x++) {
+      enqueue(x, 0);
+      enqueue(x, height - 1);
+    }
+    for (let y = 0; y < height; y++) {
+      enqueue(0, y);
+      enqueue(width - 1, y);
+    }
+
+    while (qHead < qTail) {
+      const x = queueX[qHead];
+      const y = queueY[qHead];
+      qHead += 1;
+
+      const idx = (y * width + x) * 4;
+      pixels[idx + 3] = 0;
+
+      if (x > 0) enqueue(x - 1, y);
+      if (x + 1 < width) enqueue(x + 1, y);
+      if (y > 0) enqueue(x, y - 1);
+      if (y + 1 < height) enqueue(x, y + 1);
+    }
+
+    ctx.putImageData(imgData, 0, 0);
+    return canvas.toDataURL("image/png");
+  }
+
+  async function fileToDataUrlWithoutBackground(file: File): Promise<string> {
+    const raw = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve((e.target?.result as string) || "");
+      reader.onerror = () => reject(new Error("Falha ao ler arquivo de imagem."));
+      reader.readAsDataURL(file);
+    });
+
+    if (!raw) return "";
+    try {
+      return await removeImageBackgroundDataUrl(raw);
+    } catch {
+      return raw;
+    }
+  }
+
   function productsFromTextLines(lines: string[], sourceName: string): ExtractedProduct[] {
     const cleaned = lines.map((l) => l.trim()).filter(Boolean);
     const { defaultCat, defaultUnit } = getImportDefaults();
@@ -667,6 +804,7 @@ export default function AdminPage() {
           out.push({
             id: crypto.randomUUID(),
             selected: true,
+            showInVitrine: false,
             name: buf.name,
             description: (buf.desc || buf.name).slice(0, 240),
             price,
@@ -689,6 +827,7 @@ export default function AdminPage() {
       out.push({
         id: crypto.randomUUID(),
         selected: true,
+        showInVitrine: false,
         name: buf.name,
         description: (buf.desc || buf.name).slice(0, 240),
         price: "0",
@@ -703,6 +842,7 @@ export default function AdminPage() {
       out.push({
         id: crypto.randomUUID(),
         selected: true,
+        showInVitrine: false,
         name: sourceName.replace(/\.[^.]+$/, "") || "Produto importado",
         description: merged || "Produto sem texto reconhecido",
         price: "0",
@@ -774,6 +914,7 @@ export default function AdminPage() {
         products.push({
           id: crypto.randomUUID(),
           selected: true,
+          showInVitrine: false,
           name: cleanedName || `Produto ${products.length + 1}`,
           description: (description || cleanedName || "Produto importado do Excel").slice(0, 240),
           price,
@@ -1028,7 +1169,9 @@ export default function AdminPage() {
               const id2 = ictx.createImageData(imgData.width, imgData.height);
               id2.data.set(rgba);
               ictx.putImageData(id2, 0, 0);
-              embeddedImages.push(ic.toDataURL("image/jpeg", 0.8));
+              const rawImage = ic.toDataURL("image/png");
+              const cleanedImage = await removeImageBackgroundDataUrl(rawImage).catch(() => rawImage);
+              embeddedImages.push(cleanedImage);
             } catch { }
           }
         } catch { }
@@ -1079,6 +1222,7 @@ export default function AdminPage() {
               pageProducts.push({
                 id: crypto.randomUUID(),
                 selected: true,
+                showInVitrine: false,
                 name: buf.name.trim(),
                 description: (buf.desc || buf.name).trim().slice(0, 220),
                 price,
@@ -1100,6 +1244,7 @@ export default function AdminPage() {
           pageProducts.push({
             id: crypto.randomUUID(),
             selected: true,
+            showInVitrine: false,
             name: buf.name.trim(),
             description: (buf.desc || buf.name).trim().slice(0, 220),
             price: "0",
@@ -1113,6 +1258,7 @@ export default function AdminPage() {
           allProducts.push({
             id: crypto.randomUUID(),
             selected: true,
+            showInVitrine: false,
             name: "",
             description: "",
             price: "0",
@@ -1163,7 +1309,7 @@ export default function AdminPage() {
       category: p.category || categories[0] || "Salgado",
       unit: p.unit || "un",
       imageUrl: p.imageUrl,
-      available: true,
+      available: p.showInVitrine,
     }));
 
     const progressInterval = setInterval(() => {
@@ -1810,8 +1956,8 @@ export default function AdminPage() {
                     <div>
                       <h2 className="text-xl font-bold text-white">Importação em massa (PDF, Excel, Word, PowerPoint)</h2>
                       <p className="mt-1 text-xs text-[#9bb0d0]">
-                        Os produtos importados entram com status <strong className="text-[#8fe0b8]">na vitrine</strong> e
-                        também aparecem no <strong className="text-[#8db5ff]">Cardápio Digital</strong>.
+                        Todos os produtos importados aparecem no <strong className="text-[#8db5ff]">Cardápio Digital</strong>.
+                        Marque manualmente quais devem ficar <strong className="text-[#8fe0b8]">na vitrine</strong>.
                       </p>
                     </div>
 
@@ -1908,8 +2054,25 @@ export default function AdminPage() {
                           <span className="text-xs font-bold text-white">
                             {extractedProducts.filter((p) => p.selected).length}/{extractedProducts.length} selecionado(s)
                           </span>
+                          <span className="text-xs font-bold text-[#8fe0b8]">
+                            Vitrine: {extractedProducts.filter((p) => p.selected && p.showInVitrine).length}
+                          </span>
                           <button type="button" onClick={() => setExtractedProducts((p) => p.map((x) => ({ ...x, selected: true })))} className="text-xs font-bold text-[#8db5ff] underline">Todos</button>
                           <button type="button" onClick={() => setExtractedProducts((p) => p.map((x) => ({ ...x, selected: false })))} className="text-xs font-bold text-[#ff8c98] underline">Nenhum</button>
+                          <button
+                            type="button"
+                            onClick={() => setExtractedProducts((p) => p.map((x) => (x.selected ? { ...x, showInVitrine: true } : x)))}
+                            className="text-xs font-bold text-[#8fe0b8] underline"
+                          >
+                            Vitrine todos
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setExtractedProducts((p) => p.map((x) => ({ ...x, showInVitrine: false })))}
+                            className="text-xs font-bold text-[#9bb0d0] underline"
+                          >
+                            Vitrine nenhum
+                          </button>
                           <button
                             type="button"
                             onClick={() => { setCurrentImportIdx(0); setShowImportModal(true); }}
@@ -1924,28 +2087,45 @@ export default function AdminPage() {
                             const priceVal = parseFloat(prod.price);
                             const priceOk = !isNaN(priceVal) && priceVal > 0;
                             return (
-                              <button
+                              <div
                                 key={prod.id}
-                                type="button"
-                                onClick={() => { setCurrentImportIdx(idx); setShowImportModal(true); }}
                                 className={`group relative overflow-hidden rounded-xl border-2 text-left transition ${
                                   prod.selected ? "border-[#2a4162] bg-[#101d33]" : "border-[#1a2a40] bg-[#080f1c] opacity-40"
                                 } hover:border-[#0f5bd4]`}
                               >
-                                <div className="aspect-square overflow-hidden bg-[#0b1424]">
-                                  {prod.imageUrl ? (
-                                    <img src={prod.imageUrl} alt="" className="h-full w-full object-cover" />
-                                  ) : (
-                                    <div className="flex h-full items-center justify-center text-2xl opacity-20">🍞</div>
-                                  )}
-                                </div>
-                                <div className="p-1.5">
-                                  <p className="truncate text-[10px] font-bold text-[#eef4ff]">{prod.name || "Sem nome"}</p>
-                                  <p className={`text-[10px] font-semibold ${priceOk ? "text-[#8db5ff]" : "text-[#ff8c98]"}`}>
-                                    {priceOk ? `R$ ${prod.price}` : "Sem preço"}
-                                  </p>
-                                </div>
-                              </button>
+                                <button
+                                  type="button"
+                                  onClick={() => { setCurrentImportIdx(idx); setShowImportModal(true); }}
+                                  className="w-full text-left"
+                                >
+                                  <div className="aspect-square overflow-hidden bg-[#0b1424]">
+                                    {prod.imageUrl ? (
+                                      <img src={prod.imageUrl} alt="" className="h-full w-full object-contain p-1" />
+                                    ) : (
+                                      <div className="flex h-full items-center justify-center text-2xl opacity-20">🍞</div>
+                                    )}
+                                  </div>
+                                  <div className="p-1.5">
+                                    <p className="truncate text-[10px] font-bold text-[#eef4ff]">{prod.name || "Sem nome"}</p>
+                                    <p className={`text-[10px] font-semibold ${priceOk ? "text-[#8db5ff]" : "text-[#ff8c98]"}`}>
+                                      {priceOk ? `R$ ${prod.price}` : "Sem preço"}
+                                    </p>
+                                  </div>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setExtractedProducts((prev) => prev.map((p) => (
+                                    p.id === prod.id ? { ...p, showInVitrine: !p.showInVitrine } : p
+                                  )))}
+                                  className={`mx-1 mb-1 w-[calc(100%-0.5rem)] rounded-md border px-1.5 py-1 text-[10px] font-bold ${
+                                    prod.showInVitrine
+                                      ? "border-[#1f8b4c] bg-[#1f8b4c]/15 text-[#8fe0b8]"
+                                      : "border-[#365682] bg-[#13233f] text-[#9bb0d0]"
+                                  }`}
+                                >
+                                  {prod.showInVitrine ? "⭐ Na vitrine" : "📚 Só cardápio"}
+                                </button>
+                              </div>
                             );
                           })}
                         </div>
@@ -2408,14 +2588,10 @@ export default function AdminPage() {
         if (!prod) return null;
         const update = (patch: Partial<ExtractedProduct>) =>
           setExtractedProducts((prev) => prev.map((p) => (p.id === prod.id ? { ...p, ...patch } : p)));
-        const setImageFromFile = (file?: File) => {
+        const setImageFromFile = async (file?: File) => {
           if (!file || !file.type.startsWith("image/")) return;
-          const reader = new FileReader();
-          reader.onload = (e) => {
-            const result = e.target?.result as string;
-            if (result) update({ imageUrl: result });
-          };
-          reader.readAsDataURL(file);
+          const result = await fileToDataUrlWithoutBackground(file);
+          if (result) update({ imageUrl: result });
         };
         const priceVal = parseFloat(prod.price);
         const priceOk = !isNaN(priceVal) && priceVal > 0;
@@ -2462,7 +2638,7 @@ export default function AdminPage() {
                     className="group relative h-52 w-full overflow-hidden rounded-xl border-2 border-dashed border-[#2f466d] bg-[#091426] hover:border-[#0f5bd4] transition"
                   >
                     {prod.imageUrl ? (
-                      <img src={prod.imageUrl} alt="" className="h-full w-full object-cover" />
+                      <img src={prod.imageUrl} alt="" className="h-full w-full object-contain p-2" />
                     ) : (
                       <div className="flex h-full flex-col items-center justify-center gap-2 text-[#4a6890]">
                         <span className="text-4xl">📷</span>
@@ -2533,6 +2709,17 @@ export default function AdminPage() {
                     className="h-5 w-5 accent-[#0f5bd4]" />
                   <span className="text-sm font-bold text-[#d6e3f8]">Incluir este produto na importação</span>
                 </label>
+
+                <label className="flex cursor-pointer items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={prod.showInVitrine}
+                    onChange={(e) => update({ showInVitrine: e.target.checked })}
+                    className="h-5 w-5 accent-[#1f8b4c]"
+                  />
+                  <span className="text-sm font-bold text-[#d6e3f8]">Enviar para vitrine (pedidos)</span>
+                </label>
+                <p className="text-[11px] text-[#9bb0d0]">Mesmo desligado, o produto continua no Cardápio Digital.</p>
               </div>
 
               {/* Footer — navegação */}
