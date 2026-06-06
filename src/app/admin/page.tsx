@@ -244,6 +244,18 @@ export default function AdminPage() {
     return tableSummaries.find((table) => table.tableId === selectedTableId) || null;
   }, [selectedTableId, tableSummaries]);
 
+  const quickSelfServiceOrders = useMemo(() => {
+    return todayOrders.filter((order) => getOrderTableId(order) === "11");
+  }, [todayOrders]);
+
+  const selectedTableOrders = useMemo(() => {
+    if (!selectedTableId) return [];
+    if (selectedTableId === "11") {
+      return quickSelfServiceOrders;
+    }
+    return selectedTableSummary?.orders || [];
+  }, [selectedTableId, selectedTableSummary, quickSelfServiceOrders]);
+
   const filteredOrders = useMemo(() => {
     return todayOrders.filter((order) => {
       const matchesStatus = orderStatusFilter === "" || order.status === orderStatusFilter;
@@ -2343,7 +2355,9 @@ export default function AdminPage() {
                     const summary = tableSummaries.find((t) => t.tableId === tableId);
                     const isOccupied = Boolean(summary && summary.count > 0);
                     const isCashierQuickTable = tableId === "11";
-                    const quickOrderCount = summary?.count || 0;
+                    const quickOrderCount = isCashierQuickTable
+                      ? quickSelfServiceOrders.length
+                      : summary?.count || 0;
                     const showOccupied = isCashierQuickTable ? false : isOccupied;
 
                     return (
@@ -2351,12 +2365,17 @@ export default function AdminPage() {
                         <div className="flex items-center justify-between">
                           <h3 className="text-xl text-white">Mesa {tableId}</h3>
                           {isCashierQuickTable && quickOrderCount > 0 ? (
-                            <span className="inline-flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedTableId("11")}
+                              className="inline-flex items-center gap-2 rounded-lg px-1 py-0.5 hover:bg-[#2a1530]/35"
+                              title="Ver pedidos de autoatendimento"
+                            >
                               <span className="inline-flex h-7 min-w-7 items-center justify-center rounded-full bg-[#ff4d6d] px-2 text-xs font-black text-white shadow-[0_0_18px_rgba(255,77,109,0.65)] animate-bounce">
                                 {quickOrderCount}
                               </span>
                               <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#ff8c98]">Pedido</span>
-                            </span>
+                            </button>
                           ) : (
                             <span className={`text-xs font-bold ${showOccupied ? "text-[#ff8c98]" : "text-[#8fe0b8]"}`}>
                               {isCashierQuickTable ? "Autoatendimento" : showOccupied ? "Ocupada" : "Livre"}
@@ -2802,12 +2821,12 @@ export default function AdminPage() {
             </div>
 
             <p className="mt-2 text-sm text-[#8db5ff]">
-              {selectedTableSummary?.count || 0} pedido(s) ativo(s) nesta mesa
+              {selectedTableOrders.length} pedido(s) nesta mesa
             </p>
 
             <div className="mt-4 max-h-[360px] space-y-2 overflow-y-auto pr-1">
-              {selectedTableSummary && selectedTableSummary.orders.length > 0 ? (
-                selectedTableSummary.orders.map((order) => (
+              {selectedTableOrders.length > 0 ? (
+                selectedTableOrders.map((order) => (
                   <article key={order.id} className="rounded-xl border border-[#2b4062] bg-[#101d33] p-3">
                     <div className="flex items-center justify-between">
                       <p className="font-bold text-[#eef4ff]">{order.customerName}</p>
