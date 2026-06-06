@@ -1,9 +1,12 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { products, categories, addons } from "@/lib/db/schema";
+import { products, categories } from "@/lib/db/schema";
 import { ilike } from "drizzle-orm";
 import { UnitMeasure } from "@/lib/types";
+
+const MAX_NAME_LENGTH = 200;
+const MAX_CATEGORY_LENGTH = 100;
 
 function isAdminCookieValid(cookieValue: string | undefined) {
   const expected = process.env.ADMIN_SESSION_TOKEN || "padaria_admin_token_dev";
@@ -20,6 +23,28 @@ type BulkProduct = {
   available: boolean;
 };
 
+function normalizePrice(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const raw = String(value ?? "").trim();
+  if (!raw) return 0;
+  const normalized = raw.replace(/\s/g, "").replace(/R\$/gi, "").replace(/\./g, "").replace(",", ".");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeUnit(value: unknown): UnitMeasure {
+  const unit = String(value ?? "").trim().toLowerCase();
+  const validUnits: UnitMeasure[] = ["un", "kg", "g", "l", "ml"];
+  return validUnits.includes(unit as UnitMeasure) ? (unit as UnitMeasure) : "un";
+}
+
+function formatDbError(error: unknown) {
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as { message?: unknown }).message ?? "Erro no banco.");
+  }
+  return String(error);
+}
+
 export async function POST(request: Request) {
   const cookieStore = await cookies();
   const adminCookie = cookieStore.get("padaria_admin_session")?.value;
@@ -35,27 +60,49 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Lista de produtos vazia." }, { status: 400 });
   }
 
-  const validUnits: UnitMeasure[] = ["un", "kg", "g", "l", "ml"];
   const results: { name: string; ok: boolean; error?: string }[] = [];
+  const categoryCache = new Map<string, string>();
 
   for (const item of items) {
-    const name = String(item.name ?? "").trim();
-    const description = String(item.description ?? "").trim() || name;
-    const price = Number(item.price ?? 0);
-    const categoryName = String(item.category ?? "").trim();
-    const unit = (validUnits.includes(item.unit as UnitMeasure) ? item.unit : "un") as UnitMeasure;
+    const rawName = String(item.name ?? "").trim();
+    const name = rawName.slice(0, MAX_NAME_LENGTH);
+    const description = (String(item.description ?? "").trim() || name).slice(0, 500);
+    const price = normalizePrice(item.price);
+    const categoryName = String(item.category ?? "").trim().slice(0, MAX_CATEGORY_LENGTH);
+    const unit = normalizeUnit(item.unit);
     const imageUrl = String(item.imageUrl ?? "").trim();
 
     if (!name || !categoryName || price <= 0) {
-      results.push({ name: name || "(sem nome)", ok: false, error: "Dados invalidos" });
+      results.push({
+        name: name || "(sem nome)",
+        ok: false,
+        error: "Dados invalidos (nome/categoria/preco).",
+      });
       continue;
     }
 
     try {
-      // Ensure category exists
-      let [cat] = await db.select().from(categories).where(ilike(categories.name, categoryName)).limit(1);
-      if (!cat) {
-        [cat] = await db.insert(categories).values({ name: categoryName }).returning();
+      const cacheKey = categoryName.toLowerCase();
+      let categoryId = categoryCache.get(cacheKey);
+
+      if (!categoryId) {
+        let [cat] = await db.select().from(categories).where(ilike(categories.name, categoryName)).limit(1);
+        if (!cat) {
+          try {
+            [cat] = await db.insert(categories).values({ name: categoryName }).returning();
+          } catch {
+            // In concorrencia, outra insercao pode vencer. Reconsulta para reaproveitar a categoria criada.
+            [cat] = await db.select().from(categories).where(ilike(categories.name, categoryName)).limit(1);
+          }
+        }
+
+        if (!cat) {
+          results.push({ name, ok: false, error: "Nao foi possivel resolver a categoria." });
+          continue;
+        }
+
+        categoryId = cat.id;
+        categoryCache.set(cacheKey, categoryId);
       }
 
       const [newProduct] = await db
@@ -64,7 +111,7 @@ export async function POST(request: Request) {
           name,
           description,
           price: String(price),
-          categoryId: cat.id,
+          categoryId,
           unit,
           imageUrl: imageUrl || "",
           available: Boolean(item.available ?? true),
@@ -74,7 +121,7 @@ export async function POST(request: Request) {
 
       results.push({ name: newProduct.name, ok: true });
     } catch (e) {
-      results.push({ name, ok: false, error: String(e) });
+      results.push({ name, ok: false, error: formatDbError(e) });
     }
   }
 

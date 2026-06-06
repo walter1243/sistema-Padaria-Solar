@@ -122,7 +122,7 @@ export default function AdminPage() {
   const [extractedProducts, setExtractedProducts] = useState<ExtractedProduct[]>([]);
   const [importingProducts, setImportingProducts] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
-  const [importResult, setImportResult] = useState<{ success: number; error: number } | null>(null);
+  const [importResult, setImportResult] = useState<{ success: number; error: number; details?: string[] } | null>(null);
   const [importDefaultCategory, setImportDefaultCategory] = useState("");
   const [importDefaultUnit, setImportDefaultUnit] = useState("un");
   const [replacingImageProductId, setReplacingImageProductId] = useState<string | null>(null);
@@ -1314,41 +1314,163 @@ export default function AdminPage() {
     setImportResult(null);
     setError("");
 
-    const products = toImport.map((p) => ({
+    const parseImportedPrice = (value: string) => {
+      const normalized = String(value || "")
+        .replace(/\s/g, "")
+        .replace(/R\$/gi, "")
+        .replace(/\./g, "")
+        .replace(",", ".");
+      const num = Number(normalized);
+      return Number.isFinite(num) && num > 0 ? num : 0.01;
+    };
+
+    type BulkPayloadProduct = {
+      name: string;
+      description: string;
+      price: number;
+      category: string;
+      unit: string;
+      imageUrl: string;
+      available: boolean;
+    };
+
+    const products: BulkPayloadProduct[] = toImport.map((p) => ({
       name: p.name.trim(),
       description: (p.description || p.name).trim(),
-      price: Math.max(parseFloat(p.price) || 0.01, 0.01),
+      price: parseImportedPrice(p.price),
       category: p.category || categories[0] || "Salgado",
       unit: p.unit || "un",
       imageUrl: p.imageUrl,
       available: p.showInVitrine,
     }));
 
-    const progressInterval = setInterval(() => {
-      setImportProgress((v) => Math.min(v + 5, 90));
-    }, 200);
+    const MAX_PRODUCTS_PER_CHUNK = 20;
+    const MAX_PAYLOAD_BYTES = 900_000;
+    const encoder = new TextEncoder();
 
-    try {
-      const res = await fetch("/api/menu/bulk", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ products }),
-      });
-      clearInterval(progressInterval);
-      setImportProgress(100);
+    const estimatePayloadBytes = (items: BulkPayloadProduct[]) =>
+      encoder.encode(JSON.stringify({ products: items })).length;
 
-      if (!res.ok) {
-        const payload = (await res.json().catch(() => ({}))) as { error?: string };
-        setError(payload.error || "Erro ao importar produtos.");
-        setImportingProducts(false);
-        return;
+    const buildAdaptiveChunks = (items: BulkPayloadProduct[]) => {
+      const chunks: BulkPayloadProduct[][] = [];
+      let current: BulkPayloadProduct[] = [];
+
+      for (const item of items) {
+        if (current.length === 0) {
+          current = [item];
+          continue;
+        }
+
+        const candidate = [...current, item];
+        const exceedsLimit =
+          candidate.length > MAX_PRODUCTS_PER_CHUNK || estimatePayloadBytes(candidate) > MAX_PAYLOAD_BYTES;
+
+        if (exceedsLimit) {
+          chunks.push(current);
+          current = [item];
+        } else {
+          current = candidate;
+        }
       }
 
-      const data = (await res.json()) as { success: number; errors: number };
-      setImportResult({ success: data.success, error: data.errors });
-      if (data.success > 0) loadData();
+      if (current.length > 0) chunks.push(current);
+      return chunks;
+    };
+
+    const chunks = buildAdaptiveChunks(products);
+
+    let totalSuccess = 0;
+    let totalErrors = 0;
+    const errorDetails: string[] = [];
+    let processedCount = 0;
+
+    const updateProgressBy = (count: number) => {
+      processedCount += count;
+      setImportProgress(Math.round((processedCount / products.length) * 100));
+    };
+
+    const extractErrorMessage = async (res: Response) => {
+      const payload = (await res.json().catch(() => ({}))) as { error?: string };
+      return payload.error || `Erro HTTP ${res.status}`;
+    };
+
+    const saveChunkWithFallback = async (chunk: BulkPayloadProduct[]): Promise<void> => {
+      try {
+        const res = await fetch("/api/menu/bulk", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ products: chunk }),
+        });
+
+        if (res.status === 401) {
+          throw new Error("Sessão expirada no admin. Faça login novamente e tente importar.");
+        }
+
+        if (!res.ok) {
+          if (chunk.length > 1) {
+            const middle = Math.ceil(chunk.length / 2);
+            await saveChunkWithFallback(chunk.slice(0, middle));
+            await saveChunkWithFallback(chunk.slice(middle));
+            return;
+          }
+
+          const message = await extractErrorMessage(res);
+          totalErrors += 1;
+          errorDetails.push(`${chunk[0].name}: ${message}`);
+          updateProgressBy(1);
+          return;
+        }
+
+        const data = (await res.json()) as {
+          success: number;
+          errors: number;
+          results?: { name: string; ok: boolean; error?: string }[];
+        };
+
+        totalSuccess += data.success;
+        totalErrors += data.errors;
+
+        for (const row of data.results || []) {
+          if (!row.ok && row.error) {
+            errorDetails.push(`${row.name}: ${row.error}`);
+          }
+        }
+
+        updateProgressBy(chunk.length);
+      } catch (e) {
+        if (chunk.length > 1) {
+          const middle = Math.ceil(chunk.length / 2);
+          await saveChunkWithFallback(chunk.slice(0, middle));
+          await saveChunkWithFallback(chunk.slice(middle));
+          return;
+        }
+
+        totalErrors += 1;
+        errorDetails.push(`${chunk[0].name}: ${e instanceof Error ? e.message : String(e)}`);
+        updateProgressBy(1);
+      }
+    };
+
+    try {
+      for (let i = 0; i < chunks.length; i++) {
+        await saveChunkWithFallback(chunks[i]);
+      }
+
+      setImportProgress(100);
+
+      setImportResult({
+        success: totalSuccess,
+        error: totalErrors,
+        details: errorDetails.slice(0, 5),
+      });
+
+      if (totalErrors > 0) {
+        const preview = errorDetails.slice(0, 3).join(" | ");
+        setError(`Alguns itens não foram salvos. ${preview}${errorDetails.length > 3 ? " ..." : ""}`);
+      }
+
+      if (totalSuccess > 0) loadData();
     } catch (e) {
-      clearInterval(progressInterval);
       setError("Erro de conexão: " + (e instanceof Error ? e.message : String(e)));
     } finally {
       setImportingProducts(false);
@@ -2160,6 +2282,11 @@ export default function AdminPage() {
                               ✓ {importResult.success} produto(s) salvo(s) com sucesso
                               {importResult.error > 0 && <span className="ml-2 text-[#ff8c98]">· {importResult.error} com erro</span>}
                             </p>
+                            {importResult.details && importResult.details.length > 0 && (
+                              <p className="mt-2 text-xs font-semibold text-[#ff8c98]">
+                                Erros: {importResult.details.join(" | ")}
+                              </p>
+                            )}
                             <button
                               type="button"
                               onClick={() => { setExtractedProducts([]); setImportResult(null); setMenuTab("lista"); }}
